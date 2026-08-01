@@ -12,7 +12,7 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="trust-cert"
-APP_VERSION="2.2.0"
+APP_VERSION="2.2.1"
 APP_RELEASE_DATE="2026-08-01"
 DEFAULT_PORT="443"
 LOG_DIR="${HOME}/.local/state/trust-cert"
@@ -538,6 +538,25 @@ macos_cert_exists() {
         | grep -Fxiq -e "$current_sha1" -e "$current_sha256"
 }
 
+normalize_fingerprint() {
+    printf "%s" "$1" | tr -d ':' | tr '[:lower:]' '[:upper:]'
+}
+
+macos_delete_current_certificate() {
+    local current_sha256=""
+    local current_sha1=""
+
+    current_sha256=$(normalize_fingerprint "$FINGERPRINT_SHA256")
+    current_sha1=$(normalize_fingerprint "$FINGERPRINT_SHA1")
+
+    if run_cmd sudo security delete-certificate -Z "$current_sha256" "$SYSTEM_KEYCHAIN"; then
+        return 0
+    fi
+
+    warn "Não consegui remover pelo SHA-256; tentando pelo SHA-1."
+    run_cmd sudo security delete-certificate -Z "$current_sha1" "$SYSTEM_KEYCHAIN"
+}
+
 macos_stale_certificates() {
     local current_sha1=""
     local current_sha256=""
@@ -546,7 +565,7 @@ macos_stale_certificates() {
     current_sha256=$(printf "%s" "$FINGERPRINT_SHA256" | tr -d ':' | tr '[:lower:]' '[:upper:]')
 
     security find-certificate -a -c "$CN" -Z "$SYSTEM_KEYCHAIN" 2>/dev/null \
-        | awk '/hash:/ { print $NF }' \
+        | awk '/SHA-256 hash:/ { print $NF }' \
         | tr '[:lower:]' '[:upper:]' \
         | awk -v sha1="$current_sha1" -v sha256="$current_sha256" \
             '($0 != sha1) && ($0 != sha256) && !seen[$0]++'
@@ -606,7 +625,7 @@ EOF_STALE_DELETE
 
     if macos_cert_exists; then
         warn "Este certificado já está no Keychain. Vou substituir e reaplicar a confiança."
-        run_cmd sudo security delete-certificate -Z "$FINGERPRINT_SHA1" "$SYSTEM_KEYCHAIN"
+        macos_delete_current_certificate
     fi
 
     info "Pode ser solicitada sua senha de administrador."
@@ -703,7 +722,7 @@ remove_macos() {
     fi
 
     confirm_or_exit "Confirmar remoção do certificado?"
-    run_cmd sudo security delete-certificate -Z "$FINGERPRINT_SHA1" "$SYSTEM_KEYCHAIN"
+    macos_delete_current_certificate
     index_delete
     success "Certificado removido do Keychain."
     log_msg "REMOVED macos host=$HOST port=$PORTA cn=$CN sha256=$FINGERPRINT_SHA256"

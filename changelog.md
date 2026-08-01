@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.2.1 — 2026-08-01
+
+### trust-cert.sh
+
+- Corrigida remoção no macOS para enviar ao `security delete-certificate` fingerprints SHA-256/SHA-1 normalizados, sem `:`.
+- Corrigida detecção de certificados anteriores para considerar apenas o SHA-256 e não listar o SHA-1 da mesma entrada como outro certificado.
+
 ## v2.2.0 — 2026-08-01
 
 ### Geral
