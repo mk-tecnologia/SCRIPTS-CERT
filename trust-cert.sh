@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # trust-cert.sh — Importar/remover certificado SSL/TLS como confiável
-# Versão  : v2.1.0
+# Versão  : consulte APP_VERSION abaixo ou execute --version
 # Autor   : Marcos A. Campos <marcos@mktecnologia.net.br>
 # Suporte : macOS e Linux (Debian/Ubuntu/RHEL/Fedora/Arch)
 # Licença : MIT
@@ -12,7 +12,8 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="trust-cert"
-APP_VERSION="2.1.0"
+APP_VERSION="2.2.0"
+APP_RELEASE_DATE="2026-08-01"
 DEFAULT_PORT="443"
 LOG_DIR="${HOME}/.local/state/trust-cert"
 BACKUP_DIR="${HOME}/.local/share/trust-cert/certs"
@@ -53,6 +54,9 @@ NOT_AFTER=""
 FINGERPRINT_SHA256=""
 FINGERPRINT_SHA1=""
 SAN=""
+MACOS_TRUST_RESULT="trustRoot"
+IDENTITY_VALID="false"
+IDENTITY_REASON=""
 
 # ── Utilidades ────────────────────────────────────────────────────────────────
 usage() {
@@ -98,12 +102,14 @@ run_cmd() {
 }
 
 cleanup() {
+    local exit_code=$?
     if [ -n "${TMPFILE:-}" ] && [ -f "$TMPFILE" ]; then
         rm -f "$TMPFILE"
     fi
     if [ -n "${ERRFILE:-}" ] && [ -f "$ERRFILE" ]; then
         rm -f "$ERRFILE"
     fi
+    return "$exit_code"
 }
 
 on_interrupt() {
@@ -193,6 +199,21 @@ confirm_or_exit() {
     esac
 }
 
+confirm_choice() {
+    local message="$1"
+    local answer=""
+
+    if [ "$ASSUME_YES" = "true" ]; then
+        return 1
+    fi
+
+    read -r -p "$message [s/N]: " answer
+    case "$answer" in
+        s|S|sim|SIM|Sim) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # ── Sistema operacional ──────────────────────────────────────────────────────
 detect_os() {
     if [[ "${OSTYPE:-}" == "darwin"* ]]; then
@@ -278,7 +299,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "${APP_NAME} ${APP_VERSION}"
+                echo "${APP_NAME} ${APP_VERSION} (${APP_RELEASE_DATE})"
                 exit 0
                 ;;
             *)
@@ -307,7 +328,7 @@ print_header() {
     echo ""
     printf "%b╔══════════════════════════════════════════════════════╗%b\n" "$BOLD" "$NC"
     printf "%b║     trust-cert — Certificados confiáveis             ║%b\n" "$BOLD" "$NC"
-    printf "%b║     macOS / Linux                       v%-8s    ║%b\n" "$BOLD" "$APP_VERSION" "$NC"
+    printf "%b║     Versão: %-10sData: %-10s               ║%b\n" "$BOLD" "v${APP_VERSION}" "$APP_RELEASE_DATE" "$NC"
     printf "%b╚══════════════════════════════════════════════════════╝%b\n" "$BOLD" "$NC"
     echo ""
 }
@@ -363,6 +384,12 @@ extract_cert_info() {
     SAN=$(openssl x509 -text -noout -in "$TMPFILE" 2>/dev/null \
         | awk '/Subject Alternative Name/{getline; gsub(/^ +/, ""); print}' || true)
 
+    if [ "$SUBJECT" = "$ISSUER" ]; then
+        MACOS_TRUST_RESULT="trustRoot"
+    else
+        MACOS_TRUST_RESULT="trustAsRoot"
+    fi
+
     CERT_NAME="intranet-$(sanitize_name "$CN")"
     [ "$CERT_NAME" != "intranet-" ] || CERT_NAME="intranet-$(sanitize_name "$HOST")"
 }
@@ -374,6 +401,39 @@ check_expiration() {
     fi
 }
 
+certificate_matches_host() {
+    if is_ip_address "$HOST"; then
+        printf "%s\n" "$SAN" \
+            | tr ',' '\n' \
+            | sed 's/^[[:space:]]*//' \
+            | grep -Fxiq -e "IP Address:$HOST" -e "IP:$HOST"
+    else
+        printf "%s\n" "$SAN" \
+            | tr ',' '\n' \
+            | sed 's/^[[:space:]]*//' \
+            | grep -Fxiq "DNS:$HOST"
+    fi
+}
+
+check_certificate_identity() {
+    if [ -z "$SAN" ]; then
+        IDENTITY_REASON="o certificado não possui Subject Alternative Name (SAN)"
+    elif certificate_matches_host; then
+        IDENTITY_VALID="true"
+        IDENTITY_REASON="o SAN contém $HOST"
+        success "Identidade válida para '$HOST'."
+        return 0
+    elif is_ip_address "$HOST"; then
+        IDENTITY_REASON="o SAN não contém IP Address:$HOST"
+    else
+        IDENTITY_REASON="o SAN não contém DNS:$HOST"
+    fi
+
+    warn "Identidade incompatível: $IDENTITY_REASON."
+    warn "Confiar no certificado não corrige nome ou IP. O servidor precisa emitir um certificado cujo SAN contenha o endereço acessado."
+    confirm_or_exit "Importar mesmo assim? O navegador continuará indicando certificado inválido para $HOST"
+}
+
 print_cert_summary() {
     success "Certificado obtido"
     echo "  CN          : $CN"
@@ -383,7 +443,11 @@ print_cert_summary() {
     echo "  Válido até  : $NOT_AFTER"
     echo "  SHA-256     : $FINGERPRINT_SHA256"
     echo "  SHA-1       : $FINGERPRINT_SHA1"
-    [ -n "$SAN" ] && echo "  SAN         : $SAN"
+    if [ -n "$SAN" ]; then
+        echo "  SAN         : $SAN"
+    else
+        echo "  SAN         : ausente"
+    fi
 }
 
 backup_certificate() {
@@ -463,8 +527,29 @@ print_index_summary() {
 
 # ── Verificações de instalação ───────────────────────────────────────────────
 macos_cert_exists() {
+    local current_sha1=""
+    local current_sha256=""
+
+    current_sha1=$(printf "%s" "$FINGERPRINT_SHA1" | tr -d ':' | tr '[:lower:]' '[:upper:]')
+    current_sha256=$(printf "%s" "$FINGERPRINT_SHA256" | tr -d ':' | tr '[:lower:]' '[:upper:]')
+
     security find-certificate -a -Z "$SYSTEM_KEYCHAIN" 2>/dev/null \
-        | grep -iq "$FINGERPRINT_SHA1"
+        | awk '/hash:/ { print toupper($NF) }' \
+        | grep -Fxiq -e "$current_sha1" -e "$current_sha256"
+}
+
+macos_stale_certificates() {
+    local current_sha1=""
+    local current_sha256=""
+
+    current_sha1=$(printf "%s" "$FINGERPRINT_SHA1" | tr -d ':' | tr '[:lower:]' '[:upper:]')
+    current_sha256=$(printf "%s" "$FINGERPRINT_SHA256" | tr -d ':' | tr '[:lower:]' '[:upper:]')
+
+    security find-certificate -a -c "$CN" -Z "$SYSTEM_KEYCHAIN" 2>/dev/null \
+        | awk '/hash:/ { print $NF }' \
+        | tr '[:lower:]' '[:upper:]' \
+        | awk -v sha1="$current_sha1" -v sha256="$current_sha256" \
+            '($0 != sha1) && ($0 != sha256) && !seen[$0]++'
 }
 
 linux_cert_path() {
@@ -488,15 +573,48 @@ linux_cert_exists() {
 
 # ── Instalação ────────────────────────────────────────────────────────────────
 install_macos() {
+    local stale_hashes=""
+    local stale_hash=""
+
     step "Importando no Keychain do Sistema (macOS)"
 
+    stale_hashes=$(macos_stale_certificates || true)
+    if [ -n "$stale_hashes" ]; then
+        warn "Encontrei certificado(s) anterior(es) com o mesmo CN '$CN' no Keychain do Sistema:"
+        while IFS= read -r stale_hash; do
+            [ -n "$stale_hash" ] && echo "  Fingerprint : $stale_hash"
+        done <<EOF_STALE_LIST
+$stale_hashes
+EOF_STALE_LIST
+
+        if confirm_choice "Remover os certificados anteriores antes de importar o novo?"; then
+            while IFS= read -r stale_hash; do
+                [ -n "$stale_hash" ] || continue
+                run_cmd sudo security delete-certificate -Z "$stale_hash" "$SYSTEM_KEYCHAIN"
+            done <<EOF_STALE_DELETE
+$stale_hashes
+EOF_STALE_DELETE
+            success "Certificados anteriores removidos."
+        else
+            if [ "$ASSUME_YES" = "true" ]; then
+                warn "Os certificados anteriores foram mantidos no modo --yes; execute sem --yes para confirmar a limpeza interativamente."
+            else
+                warn "Os certificados anteriores foram mantidos. Eles podem causar seleção ambígua no Keychain."
+            fi
+        fi
+    fi
+
     if macos_cert_exists; then
-        warn "Este certificado já está no Keychain. Nada a fazer. Milagre: economizamos um clique."
-        return 0
+        warn "Este certificado já está no Keychain. Vou substituir e reaplicar a confiança."
+        run_cmd sudo security delete-certificate -Z "$FINGERPRINT_SHA1" "$SYSTEM_KEYCHAIN"
     fi
 
     info "Pode ser solicitada sua senha de administrador."
-    run_cmd sudo security add-trusted-cert -d -r trustRoot -k "$SYSTEM_KEYCHAIN" "$TMPFILE"
+    run_cmd sudo security add-trusted-cert \
+        -d \
+        -r "$MACOS_TRUST_RESULT" \
+        -k "$SYSTEM_KEYCHAIN" \
+        "$TMPFILE"
 
     if macos_cert_exists; then
         success "Importação validada no Keychain."
@@ -537,6 +655,7 @@ install_certificate() {
     extract_cert_info
     check_expiration
     print_cert_summary
+    check_certificate_identity
     backup_certificate
 
     echo ""
@@ -649,7 +768,12 @@ final_instructions() {
     echo ""
     echo "  1. Feche e reabra o navegador"
     echo "  2. Acesse https://$HOST:$PORTA"
-    echo "  3. O cadeado deve aparecer sem avisos de segurança"
+    if [ "$IDENTITY_VALID" = "true" ]; then
+        echo "  3. O certificado é confiável e o SAN corresponde ao endereço"
+    else
+        echo "  3. Atenção: o navegador continuará alertando porque $IDENTITY_REASON"
+        echo "     Gere no servidor um certificado com o nome e o IP desejados no SAN"
+    fi
     echo ""
 
     if [ "$OS" = "macos" ]; then
@@ -688,4 +812,6 @@ main() {
     esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

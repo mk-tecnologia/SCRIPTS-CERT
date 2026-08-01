@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # unifi-cert.sh — Gerar/aplicar certificado SSL/TLS no UniFi
-# Versão  : v2.0.0
+# Versão  : consulte APP_VERSION abaixo ou execute --version
 # Autor   : Marcos A. Campos <marcos@mktecnologia.net.br>
 # Suporte : Debian/Ubuntu (UniFi Network Application)
 # Licença : MIT
@@ -12,7 +12,8 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="unifi-cert"
-APP_VERSION="2.0.0"
+APP_VERSION="2.2.0"
+APP_RELEASE_DATE="2026-08-01"
 UNIFI_ALIAS="unifi"
 KEYSTORE="/var/lib/unifi/keystore"
 STOREPASS="aircontrolenterprise"
@@ -48,6 +49,16 @@ ADD_HOSTS="ask"
 RECREATE_CA="false"
 WORK_DIR=""
 CA_FILE=""
+BACKUP_TARGET=""
+HAD_KEYSTORE="false"
+SERVICE_STOPPED="false"
+KEYSTORE_REPLACED="false"
+NEW_KEYSTORE=""
+HAD_CA_CERT="false"
+HAD_CA_KEY="false"
+HAD_CA_SERIAL="false"
+CA_CHANGED="false"
+RUN_COMPLETE="false"
 
 # ── Utilidades ────────────────────────────────────────────────────────────────
 usage() {
@@ -95,8 +106,27 @@ run_cmd() {
 }
 
 cleanup() {
+    local exit_code=$?
+    if [ "${RUN_COMPLETE:-false}" != "true" ]; then
+        if [ "${KEYSTORE_REPLACED:-false}" = "true" ] && [ -n "${BACKUP_TARGET:-}" ]; then
+            if [ "${HAD_KEYSTORE:-false}" = "true" ]; then
+                cp "$BACKUP_TARGET/keystore" "$KEYSTORE" 2>/dev/null || true
+            else
+                rm -f "$KEYSTORE"
+            fi
+        fi
+        if [ "${CA_CHANGED:-false}" = "true" ] && [ -n "${BACKUP_TARGET:-}" ]; then
+            if [ "${HAD_CA_CERT:-false}" = "true" ]; then cp "$BACKUP_TARGET/ca.crt" "$CA_DIR/ca.crt" 2>/dev/null || true; else rm -f "$CA_DIR/ca.crt"; fi
+            if [ "${HAD_CA_KEY:-false}" = "true" ]; then cp "$BACKUP_TARGET/ca.key" "$CA_DIR/ca.key" 2>/dev/null || true; else rm -f "$CA_DIR/ca.key"; fi
+            if [ "${HAD_CA_SERIAL:-false}" = "true" ]; then cp "$BACKUP_TARGET/ca.srl" "$CA_DIR/ca.srl" 2>/dev/null || true; else rm -f "$CA_DIR/ca.srl"; fi
+        fi
+    fi
     [ -n "${WORK_DIR:-}" ] && [ -d "$WORK_DIR" ] && rm -rf "$WORK_DIR"
-    return 0
+    [ -n "${NEW_KEYSTORE:-}" ] && [ -f "$NEW_KEYSTORE" ] && rm -f "$NEW_KEYSTORE"
+    if [ "${SERVICE_STOPPED:-false}" = "true" ]; then
+        systemctl start unifi >/dev/null 2>&1 || true
+    fi
+    return "$exit_code"
 }
 
 on_interrupt() {
@@ -121,6 +151,11 @@ check_dependencies() {
     require_cmd awk
     require_cmd grep
     require_cmd sed
+    require_cmd cut
+    require_cmd tr
+    require_cmd seq
+    require_cmd sleep
+    keytool -help >/dev/null 2>&1 || error "keytool encontrado, mas o runtime Java não está funcional."
     success "Dependências disponíveis"
 }
 
@@ -167,6 +202,13 @@ confirm_or_exit() {
     case "$answer" in s|S|sim|SIM|Sim) return 0 ;; *) warn "Cancelado pelo usuário."; exit 0 ;; esac
 }
 
+confirm_optional() {
+    local message="$1" answer=""
+    [ "$ASSUME_YES" = "true" ] && return 0
+    read -r -p "$message [s/N]: " answer
+    case "$answer" in s|S|sim|SIM|Sim) return 0 ;; *) return 1 ;; esac
+}
+
 parse_args() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -184,7 +226,7 @@ parse_args() {
             -y|--yes) ASSUME_YES="true"; shift ;;
             -v|--verbose) VERBOSE="true"; shift ;;
             -h|--help) usage; exit 0 ;;
-            --version) echo "${APP_NAME} ${APP_VERSION}"; exit 0 ;;
+            --version) echo "${APP_NAME} ${APP_VERSION} (${APP_RELEASE_DATE})"; exit 0 ;;
             *) error "Opção desconhecida: $1" ;;
         esac
     done
@@ -194,7 +236,7 @@ print_header() {
     echo ""
     printf "%b╔══════════════════════════════════════════════════════╗%b\n" "$BOLD" "$NC"
     printf "%b║     unifi-cert — UniFi Network Application           ║%b\n" "$BOLD" "$NC"
-    printf "%b║     CA local + Java Keystore            v%-8s    ║%b\n" "$BOLD" "$APP_VERSION" "$NC"
+    printf "%b║     Versão: %-10sData: %-10s               ║%b\n" "$BOLD" "v${APP_VERSION}" "$APP_RELEASE_DATE" "$NC"
     printf "%b╚══════════════════════════════════════════════════════╝%b\n" "$BOLD" "$NC"
     echo ""
 }
@@ -204,7 +246,7 @@ check_unifi() {
     if systemctl list-unit-files 2>/dev/null | grep -q '^unifi\.service'; then
         success "Serviço unifi encontrado"
     else
-        warn "Serviço unifi não apareceu no systemctl. Vou continuar, mas isso cheira a instalação diferente."
+        error "Serviço unifi não encontrado. Este script requer a instalação self-hosted com unifi.service."
     fi
     [ -d "$(dirname "$KEYSTORE")" ] || error "Diretório do keystore não encontrado: $(dirname "$KEYSTORE")"
 }
@@ -245,7 +287,11 @@ collect_config() {
 stop_unifi() {
     step "Parando UniFi"
     if systemctl list-unit-files 2>/dev/null | grep -q '^unifi\.service'; then
-        run_cmd systemctl stop unifi || true
+        if ! run_cmd systemctl stop unifi; then
+            warn "Não foi possível parar o UniFi."
+            return 1
+        fi
+        SERVICE_STOPPED="true"
         success "UniFi parado"
     else
         warn "Serviço unifi não encontrado. Pulando parada do serviço."
@@ -255,7 +301,11 @@ stop_unifi() {
 start_unifi() {
     step "Iniciando UniFi"
     if systemctl list-unit-files 2>/dev/null | grep -q '^unifi\.service'; then
-        run_cmd systemctl start unifi
+        if ! run_cmd systemctl start unifi; then
+            warn "Não foi possível iniciar o UniFi."
+            return 1
+        fi
+        SERVICE_STOPPED="false"
         success "UniFi iniciado"
     else
         warn "Serviço unifi não encontrado. Inicie manualmente se necessário."
@@ -264,14 +314,37 @@ start_unifi() {
 
 backup_current() {
     step "Backup"
-    local stamp target
+    local stamp
     stamp=$(date +%Y%m%d%H%M%S)
-    target="$BACKUP_DIR/$stamp"
-    mkdir -p "$target"
-    [ -f "$KEYSTORE" ] && cp "$KEYSTORE" "$target/keystore"
-    [ -f "$CA_DIR/ca.crt" ] && cp "$CA_DIR/ca.crt" "$target/ca.crt"
-    [ -f "$CA_DIR/ca.key" ] && cp "$CA_DIR/ca.key" "$target/ca.key"
-    success "Backup salvo em: $target"
+    mkdir -p "$BACKUP_DIR"
+    BACKUP_TARGET=$(mktemp -d "$BACKUP_DIR/$stamp-XXXXXX")
+    if [ -f "$KEYSTORE" ]; then
+        cp "$KEYSTORE" "$BACKUP_TARGET/keystore"
+        HAD_KEYSTORE="true"
+    fi
+    if [ -f "$CA_DIR/ca.crt" ]; then cp "$CA_DIR/ca.crt" "$BACKUP_TARGET/ca.crt"; HAD_CA_CERT="true"; fi
+    if [ -f "$CA_DIR/ca.key" ]; then cp "$CA_DIR/ca.key" "$BACKUP_TARGET/ca.key"; HAD_CA_KEY="true"; fi
+    if [ -f "$CA_DIR/ca.srl" ]; then cp "$CA_DIR/ca.srl" "$BACKUP_TARGET/ca.srl"; HAD_CA_SERIAL="true"; fi
+    success "Backup salvo em: $BACKUP_TARGET"
+}
+
+validate_ca() {
+    local cert_pubkey="" key_pubkey="" minimum_seconds=""
+
+    minimum_seconds=$((CERT_VALIDITY * 86400))
+    openssl x509 -in "$CA_DIR/ca.crt" -noout >/dev/null 2>&1 \
+        || error "Certificado da CA inválido. Use --recreate-ca."
+    openssl pkey -in "$CA_DIR/ca.key" -noout >/dev/null 2>&1 \
+        || error "Chave privada da CA inválida. Use --recreate-ca."
+    openssl x509 -in "$CA_DIR/ca.crt" -noout -checkend "$minimum_seconds" >/dev/null 2>&1 \
+        || error "A CA expira antes do certificado solicitado. Use --recreate-ca ou reduza --days."
+    openssl x509 -in "$CA_DIR/ca.crt" -noout -text \
+        | grep -A1 'Basic Constraints' | grep -q 'CA:TRUE' \
+        || error "A CA existente não possui CA:TRUE. Use --recreate-ca."
+
+    cert_pubkey=$(openssl x509 -in "$CA_DIR/ca.crt" -pubkey -noout | openssl sha256)
+    key_pubkey=$(openssl pkey -in "$CA_DIR/ca.key" -pubout | openssl sha256)
+    [ "$cert_pubkey" = "$key_pubkey" ] || error "A chave privada não corresponde à CA. Use --recreate-ca."
 }
 
 create_or_reuse_ca() {
@@ -281,24 +354,47 @@ create_or_reuse_ca() {
     if [ "$RECREATE_CA" = "true" ] && { [ -f "$CA_DIR/ca.crt" ] || [ -f "$CA_DIR/ca.key" ]; }; then
         warn "A CA raiz será recriada. Macs que confiavam na CA antiga precisarão importar a nova. Porque confiança digital também tem crise de relacionamento."
         confirm_or_exit "Continuar recriando a CA?"
+        CA_CHANGED="true"
         rm -f "$CA_DIR/ca.crt" "$CA_DIR/ca.key" "$CA_DIR/ca.srl"
     fi
 
     if [ ! -f "$CA_DIR/ca.crt" ] || [ ! -f "$CA_DIR/ca.key" ]; then
+        CA_CHANGED="true"
         info "Criando CA raiz local"
+        cat > "$CA_DIR/ca.cnf" <<EOF_CA_CONF
+[req]
+prompt = no
+default_md = sha256
+distinguished_name = dn
+x509_extensions = v3_ca
+
+[dn]
+CN = UniFi Local CA
+O = Local Network
+C = BR
+
+[v3_ca]
+basicConstraints = critical, CA:TRUE
+keyUsage = critical, keyCertSign, cRLSign
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always
+EOF_CA_CONF
         run_cmd openssl genrsa -out "$CA_DIR/ca.key" "$CA_KEY_BITS" >/dev/null 2>&1
         run_cmd openssl req -x509 -new -nodes \
             -key "$CA_DIR/ca.key" \
             -sha256 \
             -days "$CA_VALIDITY" \
             -out "$CA_DIR/ca.crt" \
-            -subj "/CN=UniFi Local CA/O=Local Network/C=BR" >/dev/null 2>&1
+            -config "$CA_DIR/ca.cnf" \
+            -extensions v3_ca >/dev/null 2>&1
         chmod 600 "$CA_DIR/ca.key"
         chmod 644 "$CA_DIR/ca.crt"
         success "CA criada em: $CA_DIR/ca.crt"
     else
         success "CA existente reutilizada: $CA_DIR/ca.crt"
     fi
+    validate_ca
+    success "CA, chave e validade verificadas"
 }
 
 create_server_certificate() {
@@ -353,6 +449,24 @@ EOF_CONF
     openssl x509 -in "$WORK_DIR/server.crt" -noout -text 2>/dev/null | awk '/Subject Alternative Name/{getline; gsub(/^ +/, ""); print "     " $0}'
 }
 
+verify_server_certificate() {
+    local cert_pubkey="" key_pubkey=""
+
+    step "Validando certificado do servidor"
+    openssl verify -CAfile "$CA_DIR/ca.crt" "$WORK_DIR/server.crt" >/dev/null \
+        || error "O certificado do servidor não valida contra a CA local."
+    openssl x509 -in "$WORK_DIR/server.crt" -noout -checkhost "$CN" >/dev/null \
+        || error "O certificado não contém DNS:$CN no SAN."
+    openssl x509 -in "$WORK_DIR/server.crt" -noout -checkhost "$SHORT_NAME" >/dev/null \
+        || error "O certificado não contém DNS:$SHORT_NAME no SAN."
+    openssl x509 -in "$WORK_DIR/server.crt" -noout -checkip "$IP" >/dev/null \
+        || error "O certificado não contém IP:$IP no SAN."
+    cert_pubkey=$(openssl x509 -in "$WORK_DIR/server.crt" -pubkey -noout | openssl sha256)
+    key_pubkey=$(openssl pkey -in "$WORK_DIR/server.key" -pubout | openssl sha256)
+    [ "$cert_pubkey" = "$key_pubkey" ] || error "A chave privada não corresponde ao certificado do servidor."
+    success "Cadeia, SANs e chave validados"
+}
+
 import_keystore() {
     step "Importando no Java Keystore do UniFi"
 
@@ -364,25 +478,79 @@ import_keystore() {
         -name "$UNIFI_ALIAS" \
         -passout "pass:${STOREPASS}" >/dev/null 2>&1
 
-    rm -f "$KEYSTORE"
+    NEW_KEYSTORE=$(mktemp "${KEYSTORE}.new.XXXXXX")
+    rm -f "$NEW_KEYSTORE"
 
     run_cmd keytool -importkeystore \
         -deststorepass "$STOREPASS" \
         -destkeypass "$STOREPASS" \
-        -destkeystore "$KEYSTORE" \
+        -destkeystore "$NEW_KEYSTORE" \
         -srckeystore "$WORK_DIR/server.p12" \
         -srcstoretype PKCS12 \
         -srcstorepass "$STOREPASS" \
         -alias "$UNIFI_ALIAS" \
         -noprompt >/dev/null 2>&1
 
+    run_cmd keytool -list -keystore "$NEW_KEYSTORE" -storepass "$STOREPASS" -alias "$UNIFI_ALIAS" >/dev/null 2>&1 \
+        || error "O novo keystore não contém o alias '$UNIFI_ALIAS'. O keystore atual foi preservado."
+
     if id unifi >/dev/null 2>&1; then
-        run_cmd chown unifi:unifi "$KEYSTORE"
+        run_cmd chown unifi:unifi "$NEW_KEYSTORE"
     else
         warn "Usuário unifi não encontrado. Mantive o dono atual do keystore."
     fi
-    run_cmd chmod 600 "$KEYSTORE"
+    run_cmd chmod 600 "$NEW_KEYSTORE"
+    run_cmd mv "$NEW_KEYSTORE" "$KEYSTORE"
+    NEW_KEYSTORE=""
+    KEYSTORE_REPLACED="true"
     success "Keystore atualizado: $KEYSTORE"
+}
+
+restore_previous_keystore() {
+    warn "Restaurando o keystore anterior."
+    if [ "$HAD_KEYSTORE" = "true" ]; then
+        cp "$BACKUP_TARGET/keystore" "$KEYSTORE" || true
+    else
+        rm -f "$KEYSTORE"
+    fi
+    KEYSTORE_REPLACED="false"
+}
+
+verify_live_unifi() {
+    local expected="" served="" attempt=""
+
+    step "Verificando certificado servido em $IP:8443"
+    expected=$(openssl x509 -in "$WORK_DIR/server.crt" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':')
+    for attempt in $(seq 1 30); do
+        if systemctl is-active --quiet unifi; then
+            served=$(openssl s_client -connect "$IP:8443" -servername "$CN" </dev/null 2>/dev/null \
+                | openssl x509 -noout -fingerprint -sha256 2>/dev/null \
+                | cut -d= -f2 | tr -d ':') || true
+            if [ -n "$served" ] && [ "$served" = "$expected" ]; then
+                success "Serviço ativo e fingerprint SHA-256 servido confirmado: $served"
+                return 0
+            fi
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+activate_and_verify_unifi() {
+    if ! start_unifi; then
+        restore_previous_keystore
+        systemctl start unifi >/dev/null 2>&1 || true
+        SERVICE_STOPPED="false"
+        error "O UniFi não iniciou com o novo keystore; o anterior foi restaurado."
+    fi
+    if ! verify_live_unifi; then
+        run_cmd systemctl stop unifi >/dev/null 2>&1 || true
+        SERVICE_STOPPED="true"
+        restore_previous_keystore
+        systemctl start unifi >/dev/null 2>&1 || true
+        SERVICE_STOPPED="false"
+        error "O UniFi não serviu o novo certificado; o keystore anterior foi restaurado."
+    fi
 }
 
 update_hosts() {
@@ -400,7 +568,7 @@ update_hosts() {
     case "$ADD_HOSTS" in
         yes) ;;
         no) warn "Não alterei /etc/hosts por opção do usuário."; return 0 ;;
-        ask) confirm_or_exit "Adicionar ao /etc/hosts do servidor?" ;;
+        ask) if ! confirm_optional "Adicionar ao /etc/hosts do servidor?"; then warn "Não alterei /etc/hosts."; return 0; fi ;;
     esac
 
     printf "%s\n" "$line" >> /etc/hosts
@@ -418,14 +586,15 @@ final_instructions() {
     echo "1. Copie a CA raiz para o Mac:"
     printf "   %bscp root@%s:%s ~/Downloads/unifi-local-ca.crt%b\n" "$CYAN" "$IP" "$CA_DIR/ca.crt" "$NC"
     echo ""
-    echo "2. Importe o certificado servido pelo UniFi com trust-cert:"
-    printf "   %btrust-cert --host %s --port 8443%b\n" "$CYAN" "$CN" "$NC"
+    echo "2. Adicione ao /etc/hosts do Mac se for acessar pelo nome:"
+    printf "   %bsudo sh -c 'echo \"%s  %s  %s\" >> /etc/hosts'%b\n" "$CYAN" "$IP" "$CN" "$SHORT_NAME" "$NC"
     echo ""
-    echo "   Para confiar a CA raiz em vez do certificado do servidor, importe manualmente a CA no Keychain:"
+    echo "3. Prefira confiar a CA raiz local no Keychain:"
     printf "   %bsudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/Downloads/unifi-local-ca.crt%b\n" "$CYAN" "$NC"
     echo ""
-    echo "3. Adicione ao /etc/hosts do Mac se necessário:"
-    printf "   %bsudo sh -c 'echo \"%s  %s  %s\" >> /etc/hosts'%b\n" "$CYAN" "$IP" "$CN" "$SHORT_NAME" "$NC"
+    echo "   Alternativa: importe o certificado servido pelo UniFi com trust-cert usando o mesmo endereço que será acessado:"
+    printf "   %btrust-cert --host %s --port 8443%b\n" "$CYAN" "$CN" "$NC"
+    printf "   %btrust-cert --host %s --port 8443%b\n" "$CYAN" "$IP" "$NC"
     echo ""
     echo "4. Acesse:"
     printf "   %bhttps://%s:8443%b\n" "$CYAN" "$CN" "$NC"
@@ -453,11 +622,15 @@ main() {
     backup_current
     create_or_reuse_ca
     create_server_certificate
+    verify_server_certificate
     import_keystore
-    start_unifi
+    activate_and_verify_unifi
     update_hosts
     log_msg "APPLIED cn=$CN short=$SHORT_NAME ip=$IP days=$CERT_VALIDITY ca=$CA_DIR/ca.crt keystore=$KEYSTORE"
+    RUN_COMPLETE="true"
     final_instructions
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

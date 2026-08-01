@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # proxmox-cert.sh — Gerar/aplicar certificado SSL/TLS no Proxmox
-# Versão  : v2.0.0
+# Versão  : consulte APP_VERSION abaixo ou execute --version
 # Autor   : Marcos A. Campos <marcos@mktecnologia.net.br>
 # Suporte : Debian/Ubuntu — Proxmox VE e Proxmox Backup Server
 # Licença : MIT
@@ -12,7 +12,8 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="proxmox-cert"
-APP_VERSION="2.0.0"
+APP_VERSION="2.2.0"
+APP_RELEASE_DATE="2026-08-01"
 CERT_VALIDITY="825"
 KEY_BITS="4096"
 LOG_DIR="/var/log/${APP_NAME}"
@@ -47,6 +48,9 @@ KEY_FILE=""
 ENV_NAME=""
 PORT=""
 EXPORT_PEM=""
+BACKUP_TARGET=""
+HAD_CERT="false"
+HAD_KEY="false"
 
 # ── Utilidades ────────────────────────────────────────────────────────────────
 usage() {
@@ -90,8 +94,9 @@ run_cmd() {
 }
 
 cleanup() {
+    local exit_code=$?
     [ -n "${WORK_DIR:-}" ] && [ -d "$WORK_DIR" ] && rm -rf "$WORK_DIR"
-    return 0
+    return "$exit_code"
 }
 
 on_interrupt() {
@@ -120,6 +125,10 @@ check_dependencies() {
     require_cmd awk
     require_cmd grep
     require_cmd sed
+    require_cmd cut
+    require_cmd tr
+    require_cmd seq
+    require_cmd sleep
     success "Dependências básicas disponíveis"
 }
 
@@ -164,6 +173,13 @@ confirm_or_exit() {
     case "$answer" in s|S|sim|SIM|Sim) return 0 ;; *) warn "Cancelado pelo usuário."; exit 0 ;; esac
 }
 
+confirm_optional() {
+    local message="$1" answer=""
+    [ "$ASSUME_YES" = "true" ] && return 0
+    read -r -p "$message [s/N]: " answer
+    case "$answer" in s|S|sim|SIM|Sim) return 0 ;; *) return 1 ;; esac
+}
+
 parse_args() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -177,7 +193,7 @@ parse_args() {
             -y|--yes) ASSUME_YES="true"; shift ;;
             -v|--verbose) VERBOSE="true"; shift ;;
             -h|--help) usage; exit 0 ;;
-            --version) echo "${APP_NAME} ${APP_VERSION}"; exit 0 ;;
+            --version) echo "${APP_NAME} ${APP_VERSION} (${APP_RELEASE_DATE})"; exit 0 ;;
             *) error "Opção desconhecida: $1" ;;
         esac
     done
@@ -187,7 +203,7 @@ print_header() {
     echo ""
     printf "%b╔══════════════════════════════════════════════════════╗%b\n" "$BOLD" "$NC"
     printf "%b║     proxmox-cert — Proxmox VE / PBS                  ║%b\n" "$BOLD" "$NC"
-    printf "%b║     Certificado com SAN                 v%-8s    ║%b\n" "$BOLD" "$APP_VERSION" "$NC"
+    printf "%b║     Versão: %-10sData: %-10s               ║%b\n" "$BOLD" "v${APP_VERSION}" "$APP_RELEASE_DATE" "$NC"
     printf "%b╚══════════════════════════════════════════════════════╝%b\n" "$BOLD" "$NC"
     echo ""
 }
@@ -299,15 +315,86 @@ EOF_CONF
     openssl x509 -in "$WORK_DIR/server.pem" -noout -text 2>/dev/null | awk '/Subject Alternative Name/{getline; gsub(/^ +/, ""); print "     " $0}'
 }
 
-backup_current() {
-    local stamp target
-    stamp=$(date +%Y%m%d%H%M%S)
-    target="$BACKUP_DIR/$ENV_NAME-$stamp"
-    mkdir -p "$target"
+verify_generated_certificate() {
+    local cert_pubkey="" key_pubkey=""
 
-    [ -f "$CERT_FILE" ] && cp "$CERT_FILE" "$target/$(basename "$CERT_FILE")"
-    [ -f "$KEY_FILE" ] && cp "$KEY_FILE" "$target/$(basename "$KEY_FILE")"
-    success "Backup salvo em: $target"
+    step "Validando certificado e chave"
+    run_cmd openssl x509 -in "$WORK_DIR/server.pem" -noout -checkhost "$CN" >/dev/null \
+        || error "O certificado gerado não contém DNS:$CN no SAN."
+    run_cmd openssl x509 -in "$WORK_DIR/server.pem" -noout -checkhost "$SHORT_NAME" >/dev/null \
+        || error "O certificado gerado não contém DNS:$SHORT_NAME no SAN."
+    run_cmd openssl x509 -in "$WORK_DIR/server.pem" -noout -checkip "$IP" >/dev/null \
+        || error "O certificado gerado não contém IP:$IP no SAN."
+
+    cert_pubkey=$(openssl x509 -in "$WORK_DIR/server.pem" -pubkey -noout | openssl sha256)
+    key_pubkey=$(openssl pkey -in "$WORK_DIR/server.key" -pubout | openssl sha256)
+    [ "$cert_pubkey" = "$key_pubkey" ] || error "A chave privada não corresponde ao certificado gerado."
+    success "SANs e correspondência da chave validados"
+}
+
+backup_current() {
+    local stamp
+    stamp=$(date +%Y%m%d%H%M%S)
+    mkdir -p "$BACKUP_DIR"
+    BACKUP_TARGET=$(mktemp -d "$BACKUP_DIR/$ENV_NAME-$stamp-XXXXXX")
+
+    if [ -f "$CERT_FILE" ]; then
+        cp "$CERT_FILE" "$BACKUP_TARGET/$(basename "$CERT_FILE")"
+        HAD_CERT="true"
+    fi
+    if [ -f "$KEY_FILE" ]; then
+        cp "$KEY_FILE" "$BACKUP_TARGET/$(basename "$KEY_FILE")"
+        HAD_KEY="true"
+    fi
+    success "Backup salvo em: $BACKUP_TARGET"
+}
+
+restore_previous_certificate() {
+    warn "Restaurando certificado anterior após falha na aplicação."
+    if [ "$HAD_CERT" = "true" ]; then
+        cp "$BACKUP_TARGET/$(basename "$CERT_FILE")" "$CERT_FILE" || true
+    else
+        rm -f "$CERT_FILE"
+    fi
+    if [ "$HAD_KEY" = "true" ]; then
+        cp "$BACKUP_TARGET/$(basename "$KEY_FILE")" "$KEY_FILE" || true
+    else
+        rm -f "$KEY_FILE"
+    fi
+
+    if [ "$ENV_NAME" = "PBS" ]; then
+        chown root:backup "$CERT_FILE" "$KEY_FILE" 2>/dev/null || true
+        chmod 640 "$CERT_FILE" "$KEY_FILE" 2>/dev/null || true
+        systemctl reload proxmox-backup-proxy 2>/dev/null || true
+    else
+        systemctl restart pveproxy 2>/dev/null || true
+    fi
+}
+
+deployment_error() {
+    local message="$1"
+    restore_previous_certificate
+    error "$message O certificado anterior foi restaurado."
+}
+
+verify_live_certificate() {
+    local expected="" served="" attempt=""
+
+    step "Verificando certificado servido em $IP:$PORT"
+    expected=$(openssl x509 -in "$WORK_DIR/server.pem" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':')
+    for attempt in $(seq 1 15); do
+        if systemctl is-active --quiet "$1"; then
+            served=$(openssl s_client -connect "$IP:$PORT" -servername "$CN" </dev/null 2>/dev/null \
+                | openssl x509 -noout -fingerprint -sha256 2>/dev/null \
+                | cut -d= -f2 | tr -d ':') || true
+            if [ -n "$served" ] && [ "$served" = "$expected" ]; then
+                success "Serviço ativo e fingerprint SHA-256 servido confirmado: $served"
+                return 0
+            fi
+        fi
+        sleep 1
+    done
+    return 1
 }
 
 apply_pbs() {
@@ -318,14 +405,14 @@ apply_pbs() {
     [ -d /etc/proxmox-backup ] || error "Diretório /etc/proxmox-backup não encontrado. Isso não parece PBS. A realidade discorda do modo escolhido."
 
     backup_current
-    run_cmd cp "$WORK_DIR/server.pem" "$CERT_FILE"
-    run_cmd cp "$WORK_DIR/server.key" "$KEY_FILE"
-    run_cmd chown backup:backup "$CERT_FILE" "$KEY_FILE"
-    run_cmd chmod 644 "$CERT_FILE"
-    run_cmd chmod 640 "$KEY_FILE"
+    run_cmd cp "$WORK_DIR/server.pem" "$CERT_FILE" || deployment_error "Falha ao instalar o certificado do PBS."
+    run_cmd cp "$WORK_DIR/server.key" "$KEY_FILE" || deployment_error "Falha ao instalar a chave do PBS."
+    run_cmd chown root:backup "$CERT_FILE" "$KEY_FILE" || deployment_error "Falha ao ajustar o proprietário dos arquivos do PBS."
+    run_cmd chmod 640 "$CERT_FILE" "$KEY_FILE" || deployment_error "Falha ao ajustar as permissões dos arquivos do PBS."
 
-    run_cmd systemctl restart proxmox-backup-proxy
-    success "PBS reiniciado com novo certificado"
+    run_cmd systemctl reload proxmox-backup-proxy || deployment_error "O PBS não aceitou o novo certificado."
+    verify_live_certificate proxmox-backup-proxy || deployment_error "O PBS não está servindo o certificado recém-gerado."
+    success "PBS recarregado com novo certificado"
 }
 
 apply_pve() {
@@ -333,17 +420,16 @@ apply_pve() {
 
     local node
     node=$(hostname -s)
-    CERT_FILE="/etc/pve/nodes/$node/pve-ssl.pem"
-    KEY_FILE="/etc/pve/nodes/$node/pve-ssl.key"
+    CERT_FILE="/etc/pve/nodes/$node/pveproxy-ssl.pem"
+    KEY_FILE="/etc/pve/nodes/$node/pveproxy-ssl.key"
     [ -d "/etc/pve/nodes/$node" ] || error "Diretório /etc/pve/nodes/$node não encontrado. Isso não parece PVE."
 
     backup_current
-    run_cmd cp "$WORK_DIR/server.pem" "$CERT_FILE"
-    run_cmd cp "$WORK_DIR/server.key" "$KEY_FILE"
-    run_cmd chmod 644 "$CERT_FILE"
-    run_cmd chmod 640 "$KEY_FILE"
+    run_cmd cp "$WORK_DIR/server.pem" "$CERT_FILE" || deployment_error "Falha ao instalar o certificado personalizado do PVE."
+    run_cmd cp "$WORK_DIR/server.key" "$KEY_FILE" || deployment_error "Falha ao instalar a chave personalizada do PVE."
 
-    run_cmd systemctl restart pveproxy
+    run_cmd systemctl restart pveproxy || deployment_error "O PVE não aceitou o novo certificado."
+    verify_live_certificate pveproxy || deployment_error "O PVE não está servindo o certificado recém-gerado."
     success "PVE reiniciado com novo certificado"
 }
 
@@ -362,7 +448,7 @@ update_hosts() {
     case "$ADD_HOSTS" in
         yes) ;;
         no) warn "Não alterei /etc/hosts por opção do usuário."; return 0 ;;
-        ask) confirm_or_exit "Adicionar ao /etc/hosts do servidor?" ;;
+        ask) if ! confirm_optional "Adicionar ao /etc/hosts do servidor?"; then warn "Não alterei /etc/hosts."; return 0; fi ;;
     esac
 
     printf "%s\n" "$line" >> /etc/hosts
@@ -386,13 +472,14 @@ final_instructions() {
     echo "1. Copie o certificado para o Mac:"
     printf "   %bscp root@%s:%s ~/Downloads/%s.pem%b\n" "$CYAN" "$IP" "$EXPORT_PEM" "$SHORT_NAME" "$NC"
     echo ""
-    echo "2. Importe com o trust-cert:"
+    echo "2. Adicione ao /etc/hosts do Mac se for acessar pelo nome:"
+    printf "   %bsudo sh -c 'echo \"%s  %s  %s\" >> /etc/hosts'%b\n" "$CYAN" "$IP" "$CN" "$SHORT_NAME" "$NC"
+    echo ""
+    echo "3. Importe com o trust-cert usando o mesmo endereço que será acessado:"
     printf "   %btrust-cert --host %s --port %s%b\n" "$CYAN" "$CN" "$PORT" "$NC"
+    printf "   %btrust-cert --host %s --port %s%b\n" "$CYAN" "$IP" "$PORT" "$NC"
     echo ""
     echo "   Ou manualmente no Acesso às Chaves → Sistema → Sempre Confiar. Sim, o macOS faz você pedir bênção ao certificado."
-    echo ""
-    echo "3. Adicione ao /etc/hosts do Mac se necessário:"
-    printf "   %bsudo sh -c 'echo \"%s  %s  %s\" >> /etc/hosts'%b\n" "$CYAN" "$IP" "$CN" "$SHORT_NAME" "$NC"
     echo ""
     echo "4. Acesse:"
     printf "   %bhttps://%s:%s%b\n" "$CYAN" "$CN" "$PORT" "$NC"
@@ -417,6 +504,7 @@ main() {
     detect_environment
     collect_config
     create_certificate
+    verify_generated_certificate
 
     if [ "$ENV_NAME" = "PBS" ]; then
         apply_pbs
@@ -430,4 +518,6 @@ main() {
     final_instructions
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

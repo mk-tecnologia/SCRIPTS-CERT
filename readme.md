@@ -1,5 +1,7 @@
 # SCRIPTS-CERT
 
+Versão atual dos scripts: **2.2.0** — 2026-08-01. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
+
 Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos.
 
 Inclui:
@@ -27,6 +29,66 @@ Inclui:
 - Debian/Ubuntu com UniFi Network Application
 
 ## Instalação local
+
+### Instalador versionado pelo GitHub
+
+O instalador mantém cada versão em um diretório separado, registra a versão ativa e conserva a versão anterior para rollback. Tags Git como `v2.2.0` são usadas como versões publicadas; enquanto não houver tags, a branch `main` pode ser instalada.
+
+macOS ou Linux:
+
+```bash
+curl -fsSLo /tmp/scripts-cert-install.sh \
+  https://raw.githubusercontent.com/mk-tecnologia/SCRIPTS-CERT/main/install.sh
+bash /tmp/scripts-cert-install.sh
+```
+
+Instalar diretamente uma versão publicada:
+
+```bash
+bash /tmp/scripts-cert-install.sh --version v2.2.0 --yes
+```
+
+Listar, trocar e voltar versões:
+
+```bash
+scripts-cert-installer --list
+scripts-cert-installer --use v2.2.0
+scripts-cert-installer --rollback
+```
+
+O comando `scripts-cert-installer` é preservado junto da instalação. As versões e o histórico ficam em `~/.local/share/scripts-cert/`.
+
+Windows PowerShell com Git for Windows/Git Bash instalado:
+
+```powershell
+$installer = "$env:TEMP\scripts-cert-install.ps1"
+Invoke-WebRequest `
+  https://raw.githubusercontent.com/mk-tecnologia/SCRIPTS-CERT/main/install.ps1 `
+  -OutFile $installer
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
+```
+
+Comandos de versão no Windows:
+
+```powershell
+scripts-cert-installer -List
+scripts-cert-installer -Version v2.2.0 -Yes
+scripts-cert-installer -Use v2.2.0
+scripts-cert-installer -Rollback
+```
+
+No Windows, os atalhos chamam os arquivos Bash por meio do Git Bash. `proxmox-cert` e `unifi-cert` continuam destinados aos respectivos servidores Linux. O `trust-cert` atualmente gerencia os repositórios de confiança do macOS e Linux; ele não importa certificados no repositório nativo do Windows.
+
+Para publicar uma versão selecionável pelos instaladores:
+
+```bash
+git tag -a v2.2.0 -m "SCRIPTS-CERT v2.2.0"
+git push origin v2.2.0
+```
+
+Depois da publicação da tag, ela aparecerá automaticamente em `--list` ou `-List`.
+
+### Instalação manual
 
 Para executar diretamente deste diretório:
 
@@ -111,6 +173,12 @@ Opções:
 
 A partir da v2.1.0, o script grava um índice local durante a instalação. Isso permite remover o certificado instalado mesmo que o servidor esteja offline, desde que o certificado tenha sido instalado por esta versão ou posterior. Para instalações antigas sem índice, o script ainda tenta consultar o servidor remoto para identificar o certificado.
 
+No macOS, a importação grava o certificado no Keychain do Sistema. Certificados raiz/autoassinados são adicionados como `trustRoot`; certificados de servidor emitidos por outra CA são adicionados como `trustAsRoot`. Se o certificado já existir, o script substitui a entrada e reaplica a confiança.
+
+Quando encontra no Keychain do Sistema outro certificado com o mesmo CN e fingerprint diferente, o script mostra os fingerprints encontrados e oferece a remoção dos certificados anteriores. Por segurança, o modo `--yes` mantém certificados diferentes; execute sem `--yes` para confirmar essa limpeza interativamente. No Linux, o arquivo de destino baseado no CN já é substituído após confirmação.
+
+Antes da importação, o script também confere se o endereço informado aparece no `Subject Alternative Name` do certificado (`DNS:nome` para hostname ou `IP Address:endereço` para IP). A confiança é aplicada ao certificado inteiro; portanto, para funcionar pelo nome e pelo IP, o certificado emitido pelo servidor deve conter ambos no SAN. A importação no cliente não consegue acrescentar identidades a um certificado já assinado.
+
 Arquivos locais:
 
 ```text
@@ -172,7 +240,9 @@ O que o script faz:
 - Usa validade padrão de 825 dias.
 - Faz backup dos certificados antigos.
 - Aplica o certificado no caminho correto do PVE ou PBS.
-- Reinicia `pveproxy` ou `proxmox-backup-proxy`.
+- Reinicia `pveproxy` no PVE e recarrega `proxmox-backup-proxy` no PBS sem interromper backups.
+- Confirma que chave e SANs são válidos e que a porta 8006/8007 está servindo o novo fingerprint.
+- Restaura automaticamente o certificado anterior quando a aplicação ou a verificação falha.
 - Exporta o certificado para `/root/proxmox-cert-NOME.pem`.
 
 Arquivos:
@@ -230,7 +300,9 @@ O que o script faz:
 - Converte o certificado para PKCS#12.
 - Importa no Java Keystore do UniFi.
 - Faz backup do keystore e da CA.
-- Reinicia o serviço `unifi`.
+- Valida a CA, a cadeia, os SANs e a correspondência das chaves.
+- Cria e valida um keystore temporário antes de substituir o arquivo usado pelo UniFi.
+- Confirma o fingerprint servido na porta 8443 e restaura o keystore/CA anterior em caso de falha.
 
 Arquivos:
 
@@ -243,19 +315,29 @@ Keystore : /var/lib/unifi/keystore
 
 ## macOS
 
-O macOS exige certificados com SAN. CN sozinho não basta.
+O macOS e os navegadores modernos exigem certificados com SAN. CN sozinho não basta.
+
+Use no `trust-cert` o mesmo endereço que será usado no navegador.
+
+Se for acessar pelo nome, adicione a resolução no Mac quando não houver DNS interno:
+
+```bash
+sudo sh -c 'echo "10.0.1.10  pve.lab.local  pve" >> /etc/hosts'
+```
 
 Para Proxmox, use `trust-cert` no Mac para importar o certificado servido pelo PVE/PBS:
 
 ```bash
 trust-cert --host pve.lab.local --port 8006
 trust-cert --host pbs.lab.local --port 8007
+trust-cert --host 10.0.1.10 --port 8006
 ```
 
 Para UniFi, você pode importar o certificado servido pelo UniFi:
 
 ```bash
 trust-cert --host unifi.lab.local --port 8443
+trust-cert --host 10.0.1.30 --port 8443
 ```
 
 Ou confiar a CA raiz gerada pelo `unifi-cert`:

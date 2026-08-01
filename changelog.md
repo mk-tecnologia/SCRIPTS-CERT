@@ -1,5 +1,31 @@
 # Changelog
 
+## v2.2.0 — 2026-08-01
+
+### Geral
+
+- Padronizada a exibição da versão e da data de lançamento no cabeçalho e em `--version`.
+- Adicionados instaladores versionados para macOS/Linux e Windows, com seleção por tag, troca de versão e rollback local.
+
+### trust-cert.sh
+
+- Adicionada validação do SAN para o hostname ou IP solicitado.
+- Adicionada detecção de certificados anteriores com o mesmo CN no Keychain do Sistema.
+- Normalizada a comparação de fingerprints SHA-1 e SHA-256 no macOS.
+
+### proxmox-cert.sh
+
+- Corrigida a instalação personalizada do PVE para usar `pveproxy-ssl.pem` e `pveproxy-ssl.key`.
+- Corrigidas propriedade e permissões dos certificados do PBS para `root:backup` e modo `640`.
+- Alterado PBS para recarregar o proxy sem interromper tarefas de backup.
+- Adicionadas validação de SAN/chave, confirmação do fingerprint servido e restauração automática em caso de falha.
+
+### unifi-cert.sh
+
+- Adicionadas extensões explícitas e validações de chave, validade e autoridade da CA local.
+- Alterada atualização do keystore para criação temporária e substituição somente após validação.
+- Adicionadas confirmação do fingerprint servido, recuperação do keystore/CA e reinício de segurança em caso de falha.
+
 ## v2.1.0
 
 ### trust-cert.sh
@@ -10,7 +36,22 @@
 - Substituído arquivo temporário fixo do OpenSSL por arquivo único via `mktemp`.
 - Melhorada validação de hostname por labels.
 - Corrigido modo interativo para perguntar a porta antes de usar o padrão `443`.
+- Corrigido encerramento prematuro quando o certificado remoto não possui SAN.
+- Ajustada importação no macOS para usar `trustRoot` em certificados raiz/autoassinados e `trustAsRoot` em certificados de servidor emitidos por outra CA.
+- Alterada instalação no macOS para substituir a entrada existente e reaplicar a confiança quando o certificado já existe no Keychain.
 - Atualizada documentação sobre execução direta, índice local e remoção.
+
+### proxmox-cert.sh
+
+- Removido `chmod` em certificados aplicados em `/etc/pve/nodes/...`, pois o `pmxcfs` do Proxmox pode rejeitar alteração de permissões mesmo como root.
+- Ajustadas instruções finais para orientar `/etc/hosts` no Mac antes da importação por FQDN.
+- Adicionada instrução explícita para importar pelo mesmo endereço que será acessado, FQDN ou IP.
+
+### unifi-cert.sh
+
+- Ajustadas instruções finais para orientar `/etc/hosts` no Mac antes da importação por FQDN.
+- Reforçada a recomendação de confiar a CA raiz local no macOS.
+- Adicionada instrução explícita para importar pelo mesmo endereço que será acessado, FQDN ou IP.
 
 ## v2.0.0
 
