@@ -16,13 +16,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$InstallerVersion = '1.0.0'
+$InstallerVersion = '1.1.0'
 $InstallRoot = if ($env:SCRIPTS_CERT_HOME) { $env:SCRIPTS_CERT_HOME } else { Join-Path $env:LOCALAPPDATA 'Programs\ScriptsCert' }
 $VersionsDir = Join-Path $InstallRoot 'versions'
 $BinDir = Join-Path $InstallRoot 'bin'
 $CurrentFile = Join-Path $InstallRoot 'current.txt'
 $PreviousFile = Join-Path $InstallRoot 'previous.txt'
-$ScriptNames = @('trust-cert', 'proxmox-cert', 'unifi-cert')
+$ScriptNames = @('trust-cert', 'proxmox-cert', 'unifi-cert', 'ucs-cert')
 
 function Write-Info([string]$Message) { Write-Host "[INFO] $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message) { Write-Host "[OK] $Message" -ForegroundColor Green }
@@ -174,7 +174,7 @@ function Install-Version {
         $staging = $null
         Set-ActiveVersion $packageVersion
         Write-Ok "Instalacao concluida em $destination"
-        Write-Warn 'No Windows, os scripts executam pelo Git Bash. proxmox-cert e unifi-cert continuam destinados a servidores Linux.'
+        Write-Warn 'No Windows, os scripts executam pelo Git Bash. proxmox-cert, unifi-cert e ucs-cert continuam destinados a servidores Linux.'
     }
     finally {
         if ($staging -and (Test-Path $staging)) { Remove-Item -Path $staging -Recurse -Force }

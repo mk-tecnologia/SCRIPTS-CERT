@@ -1,6 +1,6 @@
 # SCRIPTS-CERT
 
-Versão atual dos scripts: **2.2.1** — 2026-08-01. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
+Versão atual dos scripts: **2.3.0** — 2026-08-03. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
 
 Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos.
 
@@ -9,6 +9,7 @@ Inclui:
 - `trust-cert.sh`: importa ou remove certificados SSL/TLS como confiáveis no macOS e Linux.
 - `proxmox-cert.sh`: gera e aplica certificado autoassinado com SAN em Proxmox VE ou Proxmox Backup Server.
 - `unifi-cert.sh`: cria uma CA local, emite certificado para UniFi Network Application e importa no Java Keystore.
+- `ucs-cert.sh`: corrige os SANs e renova o certificado de host pela CA interna do Univention UCS.
 
 ## Suporte
 
@@ -28,11 +29,15 @@ Inclui:
 
 - Debian/Ubuntu com UniFi Network Application
 
+`ucs-cert.sh`:
+
+- Univention Corporate Server no Primary Directory Node/DC Master
+
 ## Instalação local
 
 ### Instalador versionado pelo GitHub
 
-O instalador mantém cada versão em um diretório separado, registra a versão ativa e conserva a versão anterior para rollback. Tags Git como `v2.2.1` são usadas como versões publicadas; enquanto não houver tags, a branch `main` pode ser instalada.
+O instalador mantém cada versão em um diretório separado, registra a versão ativa e conserva a versão anterior para rollback. Tags Git como `v2.3.0` são usadas como versões publicadas; enquanto não houver tags, a branch `main` pode ser instalada.
 
 macOS ou Linux:
 
@@ -45,14 +50,14 @@ bash /tmp/scripts-cert-install.sh
 Instalar diretamente uma versão publicada:
 
 ```bash
-bash /tmp/scripts-cert-install.sh --version v2.2.1 --yes
+bash /tmp/scripts-cert-install.sh --version v2.3.0 --yes
 ```
 
 Listar, trocar e voltar versões:
 
 ```bash
 scripts-cert-installer --list
-scripts-cert-installer --use v2.2.1
+scripts-cert-installer --use v2.3.0
 scripts-cert-installer --rollback
 ```
 
@@ -72,18 +77,18 @@ Comandos de versão no Windows:
 
 ```powershell
 scripts-cert-installer -List
-scripts-cert-installer -Version v2.2.1 -Yes
-scripts-cert-installer -Use v2.2.1
+scripts-cert-installer -Version v2.3.0 -Yes
+scripts-cert-installer -Use v2.3.0
 scripts-cert-installer -Rollback
 ```
 
-No Windows, os atalhos chamam os arquivos Bash por meio do Git Bash. `proxmox-cert` e `unifi-cert` continuam destinados aos respectivos servidores Linux. O `trust-cert` atualmente gerencia os repositórios de confiança do macOS e Linux; ele não importa certificados no repositório nativo do Windows.
+No Windows, os atalhos chamam os arquivos Bash por meio do Git Bash. `proxmox-cert`, `unifi-cert` e `ucs-cert` continuam destinados aos respectivos servidores Linux. O `trust-cert` atualmente gerencia os repositórios de confiança do macOS e Linux; ele não importa certificados no repositório nativo do Windows.
 
 Para publicar uma versão selecionável pelos instaladores:
 
 ```bash
-git tag -a v2.2.1 -m "SCRIPTS-CERT v2.2.1"
-git push origin v2.2.1
+git tag -a v2.3.0 -m "SCRIPTS-CERT v2.3.0"
+git push origin v2.3.0
 ```
 
 Depois da publicação da tag, ela aparecerá automaticamente em `--list` ou `-List`.
@@ -93,7 +98,7 @@ Depois da publicação da tag, ela aparecerá automaticamente em `--list` ou `-L
 Para executar diretamente deste diretório:
 
 ```bash
-chmod +x trust-cert.sh proxmox-cert.sh unifi-cert.sh
+chmod +x trust-cert.sh proxmox-cert.sh unifi-cert.sh ucs-cert.sh
 ```
 
 Instalação opcional no PATH:
@@ -109,7 +114,8 @@ Para os scripts de servidor, use um diretório administrativo:
 ```bash
 sudo cp proxmox-cert.sh /usr/local/sbin/proxmox-cert
 sudo cp unifi-cert.sh /usr/local/sbin/unifi-cert
-sudo chmod +x /usr/local/sbin/proxmox-cert /usr/local/sbin/unifi-cert
+sudo cp ucs-cert.sh /usr/local/sbin/ucs-cert
+sudo chmod +x /usr/local/sbin/proxmox-cert /usr/local/sbin/unifi-cert /usr/local/sbin/ucs-cert
 ```
 
 Se `~/.local/bin` ainda não estiver no PATH, adicione ao `~/.zshrc`:
@@ -313,6 +319,59 @@ CA raiz  : /etc/ssl/unifi-ca/ca.crt
 Keystore : /var/lib/unifi/keystore
 ```
 
+## ucs-cert
+
+Corrige o SAN e renova o certificado de host pela CA interna do Univention Corporate Server. Deve ser executado no Primary Directory Node, anteriormente chamado de DC Master.
+
+Modo interativo:
+
+```bash
+sudo ./ucs-cert.sh
+```
+
+Modo direto:
+
+```bash
+sudo ./ucs-cert.sh \
+  --cn mkserver.cdl.intranet \
+  --short mkserver \
+  --ip 192.168.110.2
+```
+
+Opções:
+
+```text
+--cn FQDN          FQDN do host UCS
+--short NOME       Nome curto incluído no SAN
+--ip IP            IPv4 incluído no SAN
+--port PORTA       Porta HTTPS verificada (padrão: 443)
+--days DIAS        Validade do certificado
+-y, --yes          Executa sem confirmação
+-v, --verbose      Mostra os comandos executados
+-h, --help         Exibe ajuda
+--version          Exibe versão e data
+```
+
+O que o script faz:
+
+- Confirma que está no Primary Directory Node/DC Master.
+- Localiza `/etc/univention/ssl/FQDN/` e valida certificado e chave existentes.
+- Faz backup de `openssl.cnf`, `req.pem`, `cert.pem` e `private.key`.
+- Configura `DNS:FQDN`, `DNS:nome-curto` e `IP:endereço` no SAN.
+- Recria o CSR usando a chave privada existente.
+- Renova por `univention-certificate`, preservando a CA interna do domínio.
+- Recarrega o Apache e compara o fingerprint servido com o certificado renovado.
+- Restaura automaticamente os arquivos anteriores se qualquer etapa falhar.
+
+Arquivos:
+
+```text
+Log     : /var/log/ucs-cert/ucs-cert.log
+Backups : /var/backups/ucs-cert/
+UCS SSL : /etc/univention/ssl/FQDN/
+CA raiz : /etc/univention/ssl/ucsCA/CAcert.pem
+```
+
 ## macOS
 
 O macOS e os navegadores modernos exigem certificados com SAN. CN sozinho não basta.
@@ -338,6 +397,18 @@ Para UniFi, você pode importar o certificado servido pelo UniFi:
 ```bash
 trust-cert --host unifi.lab.local --port 8443
 trust-cert --host 10.0.1.30 --port 8443
+```
+
+Para UCS, prefira confiar uma vez na CA raiz interna do domínio:
+
+```bash
+scp root@mkserver.cdl.intranet:/etc/univention/ssl/ucsCA/CAcert.pem \
+  ~/Downloads/univention-root-ca.pem
+
+sudo security add-trusted-cert \
+  -d -r trustRoot \
+  -k /Library/Keychains/System.keychain \
+  ~/Downloads/univention-root-ca.pem
 ```
 
 Ou confiar a CA raiz gerada pelo `unifi-cert`:

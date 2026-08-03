@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-INSTALLER_VERSION="1.0.0"
+INSTALLER_VERSION="1.1.0"
 DEFAULT_REPO="mk-tecnologia/SCRIPTS-CERT"
 REPO="$DEFAULT_REPO"
 GITHUB_API_BASE="${SCRIPTS_CERT_API_BASE:-https://api.github.com}"
@@ -21,7 +21,7 @@ VERSIONS_DIR="${INSTALL_ROOT}/versions"
 CURRENT_LINK="${INSTALL_ROOT}/current"
 PREVIOUS_LINK="${INSTALL_ROOT}/previous"
 BIN_DIR="${SCRIPTS_CERT_BIN:-${HOME}/.local/bin}"
-SCRIPTS=(trust-cert proxmox-cert unifi-cert)
+SCRIPTS=(trust-cert proxmox-cert unifi-cert ucs-cert)
 STAGING_DIR=""
 
 info() { printf 'ℹ️  %s\n' "$*"; }
@@ -37,7 +37,7 @@ Uso:
   ./install.sh [opções]
 
 Opções:
-  --version REF          Instala uma tag/branch/commit específica (ex.: v2.2.1)
+  --version REF          Instala uma tag/branch/commit específica (ex.: v2.3.0)
   --list                 Lista versões publicadas no GitHub e versões locais
   --rollback             Volta para a versão anteriormente ativa
   --use VERSÃO           Ativa uma versão já instalada, sem baixar novamente

@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.3.0 — 2026-08-03
+
+### Geral
+
+- Adicionado `ucs-cert.sh` aos instaladores versionados para macOS/Linux e Windows com Git Bash.
+
+### ucs-cert.sh
+
+- Adicionado suporte específico ao certificado de host do Univention Corporate Server.
+- Adicionadas validação do papel Primary Directory Node/DC Master, backup completo e restauração automática.
+- Adicionada atualização de SAN com FQDN, nome curto e IPv4, recriação do CSR com a chave existente e renovação pela CA interna do UCS.
+- Adicionadas validações de certificado/chave, `univention-certificate check` e confirmação do fingerprint realmente servido pelo Apache.
+
 ## v2.2.1 — 2026-08-01
 
 ### trust-cert.sh
