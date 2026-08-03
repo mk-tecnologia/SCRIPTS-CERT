@@ -1,6 +1,6 @@
 # SCRIPTS-CERT
 
-Versão atual dos scripts: **2.3.0** — 2026-08-03. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
+Versão atual dos scripts: **2.3.1** — 2026-08-03. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
 
 Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos.
 
@@ -37,7 +37,7 @@ Inclui:
 
 ### Instalador versionado pelo GitHub
 
-O instalador mantém cada versão em um diretório separado, registra a versão ativa e conserva a versão anterior para rollback. Tags Git como `v2.3.0` são usadas como versões publicadas; enquanto não houver tags, a branch `main` pode ser instalada.
+O instalador mantém cada versão em um diretório separado, registra a versão ativa e conserva a versão anterior para rollback. Tags Git como `v2.3.1` são usadas como versões publicadas; enquanto não houver tags, a branch `main` pode ser instalada.
 
 macOS ou Linux:
 
@@ -50,14 +50,14 @@ bash /tmp/scripts-cert-install.sh
 Instalar diretamente uma versão publicada:
 
 ```bash
-bash /tmp/scripts-cert-install.sh --version v2.3.0 --yes
+bash /tmp/scripts-cert-install.sh --version v2.3.1 --yes
 ```
 
 Listar, trocar e voltar versões:
 
 ```bash
 scripts-cert-installer --list
-scripts-cert-installer --use v2.3.0
+scripts-cert-installer --use v2.3.1
 scripts-cert-installer --rollback
 ```
 
@@ -77,8 +77,8 @@ Comandos de versão no Windows:
 
 ```powershell
 scripts-cert-installer -List
-scripts-cert-installer -Version v2.3.0 -Yes
-scripts-cert-installer -Use v2.3.0
+scripts-cert-installer -Version v2.3.1 -Yes
+scripts-cert-installer -Use v2.3.1
 scripts-cert-installer -Rollback
 ```
 
@@ -87,8 +87,8 @@ No Windows, os atalhos chamam os arquivos Bash por meio do Git Bash. `proxmox-ce
 Para publicar uma versão selecionável pelos instaladores:
 
 ```bash
-git tag -a v2.3.0 -m "SCRIPTS-CERT v2.3.0"
-git push origin v2.3.0
+git tag -a v2.3.1 -m "SCRIPTS-CERT v2.3.1"
+git push origin v2.3.1
 ```
 
 Depois da publicação da tag, ela aparecerá automaticamente em `--list` ou `-List`.

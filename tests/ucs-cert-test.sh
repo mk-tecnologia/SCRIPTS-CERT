@@ -43,6 +43,7 @@ cmp "$TEST_ROOT/expected/cert.pem" "$CERT_FILE"
 cmp "$TEST_ROOT/expected/private.key" "$KEY_FILE"
 
 update_san_config
+grep -Fq 'subjectAltName = DNS:must-remain.example.test' "$OPENSSL_CONFIG"
 openssl req -new -key "$KEY_FILE" -config "$OPENSSL_CONFIG" -out "$REQUEST_FILE"
 
 SAN_OUTPUT=$(openssl req -in "$REQUEST_FILE" -noout -text \

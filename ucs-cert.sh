@@ -10,7 +10,7 @@
 set -euo pipefail
 
 APP_NAME="ucs-cert"
-APP_VERSION="2.3.0"
+APP_VERSION="2.3.1"
 APP_RELEASE_DATE="2026-08-03"
 DEFAULT_PORT="443"
 DEFAULT_MAX_DAYS="3650"
@@ -282,15 +282,22 @@ backup_current() {
 update_san_config() {
     local san_count="" generated_config=""
     step "Atualizando SAN no openssl.cnf"
-    san_count=$(grep -Ec '^[[:space:]]*subjectAltName[[:space:]]*=' "$OPENSSL_CONFIG" || true)
+    san_count=$(awk '
+        /^[[:space:]]*\[[[:space:]]*v3_req[[:space:]]*\][[:space:]]*$/ { in_v3_req = 1; next }
+        /^[[:space:]]*\[/ { in_v3_req = 0 }
+        in_v3_req && /^[[:space:]]*subjectAltName[[:space:]]*=/ { count++ }
+        END { print count + 0 }
+    ' "$OPENSSL_CONFIG")
     [ "$san_count" -eq 1 ] \
-        || error "Esperava exatamente uma linha subjectAltName em $OPENSSL_CONFIG; encontrei $san_count. Nenhum arquivo foi alterado."
+        || error "Esperava exatamente uma linha subjectAltName na seção [v3_req] de $OPENSSL_CONFIG; encontrei $san_count. Nenhum arquivo foi alterado."
 
     [ -n "${WORK_DIR:-}" ] && [ -d "$WORK_DIR" ] && rm -rf "$WORK_DIR"
     WORK_DIR=$(mktemp -d "/tmp/${APP_NAME}_XXXXXX")
     generated_config="$WORK_DIR/openssl.cnf"
     awk -v san="subjectAltName = DNS:${CN}, DNS:${SHORT_NAME}, IP:${IP}" '
-        /^[[:space:]]*subjectAltName[[:space:]]*=/ { print san; next }
+        /^[[:space:]]*\[[[:space:]]*v3_req[[:space:]]*\][[:space:]]*$/ { in_v3_req = 1; print; next }
+        /^[[:space:]]*\[/ { in_v3_req = 0 }
+        in_v3_req && /^[[:space:]]*subjectAltName[[:space:]]*=/ { print san; next }
         { print }
     ' "$OPENSSL_CONFIG" > "$generated_config"
 

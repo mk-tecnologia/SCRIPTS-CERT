@@ -13,3 +13,6 @@ basicConstraints = CA:FALSE
 keyUsage = digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
 subjectAltName = DNS:old.example.test, DNS:old
+
+[server_cert]
+subjectAltName = DNS:must-remain.example.test

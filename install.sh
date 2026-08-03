@@ -37,7 +37,7 @@ Uso:
   ./install.sh [opções]
 
 Opções:
-  --version REF          Instala uma tag/branch/commit específica (ex.: v2.3.0)
+  --version REF          Instala uma tag/branch/commit específica (ex.: v2.3.1)
   --list                 Lista versões publicadas no GitHub e versões locais
   --rollback             Volta para a versão anteriormente ativa
   --use VERSÃO           Ativa uma versão já instalada, sem baixar novamente

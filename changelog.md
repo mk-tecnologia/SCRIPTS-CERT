@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.3.1 — 2026-08-03
+
+### ucs-cert.sh
+
+- Corrigida atualização do SAN para localizar e alterar exclusivamente `subjectAltName` dentro da seção `[v3_req]`, permitindo configurações UCS com outras diretivas `subjectAltName` em seções diferentes.
+
 ## v2.3.0 — 2026-08-03
 
 ### Geral
