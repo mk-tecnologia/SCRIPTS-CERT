@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.3.2 — 2026-08-14
+
+### Geral
+
+- Simplificadas as instruções de instalação e uso no README, com fluxo rápido por equipamento.
+
+### unifi-cert.sh
+
+- Corrigida a detecção de `unifi.service` com `set -o pipefail`, que podia informar incorretamente que o serviço não existia.
+
 ## v2.3.1 — 2026-08-03
 
 ### ucs-cert.sh
