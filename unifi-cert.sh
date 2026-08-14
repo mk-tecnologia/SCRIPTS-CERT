@@ -142,6 +142,10 @@ trap on_interrupt INT TERM
 require_root() { [ "${EUID:-$(id -u)}" -eq 0 ] || error "Execute como root: sudo $0"; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || error "Comando obrigatório não encontrado: $1"; }
 
+unifi_service_exists() {
+    [ "$(systemctl show --property=LoadState --value unifi.service 2>/dev/null || true)" = "loaded" ]
+}
+
 check_dependencies() {
     step "Verificando dependências"
     require_cmd openssl
@@ -243,7 +247,7 @@ print_header() {
 
 check_unifi() {
     step "Verificando UniFi"
-    if systemctl list-unit-files 2>/dev/null | grep -q '^unifi\.service'; then
+    if unifi_service_exists; then
         success "Serviço unifi encontrado"
     else
         error "Serviço unifi não encontrado. Este script requer a instalação self-hosted com unifi.service."
@@ -286,7 +290,7 @@ collect_config() {
 
 stop_unifi() {
     step "Parando UniFi"
-    if systemctl list-unit-files 2>/dev/null | grep -q '^unifi\.service'; then
+    if unifi_service_exists; then
         if ! run_cmd systemctl stop unifi; then
             warn "Não foi possível parar o UniFi."
             return 1
@@ -300,7 +304,7 @@ stop_unifi() {
 
 start_unifi() {
     step "Iniciando UniFi"
-    if systemctl list-unit-files 2>/dev/null | grep -q '^unifi\.service'; then
+    if unifi_service_exists; then
         if ! run_cmd systemctl start unifi; then
             warn "Não foi possível iniciar o UniFi."
             return 1

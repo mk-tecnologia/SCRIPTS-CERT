@@ -2,7 +2,7 @@
 
 Versão atual dos scripts: **2.3.1** — 2026-08-03. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
 
-Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos.
+Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos. Todos podem ser usados de forma interativa: execute o comando e responda às perguntas.
 
 Inclui:
 
@@ -33,13 +33,11 @@ Inclui:
 
 - Univention Corporate Server no Primary Directory Node/DC Master
 
-## Instalação local
+## Instalação
 
-### Instalador versionado pelo GitHub
+### Linux e macOS
 
-O instalador mantém cada versão em um diretório separado, registra a versão ativa e conserva a versão anterior para rollback. Tags Git como `v2.3.1` são usadas como versões publicadas; enquanto não houver tags, a branch `main` pode ser instalada.
-
-macOS ou Linux:
+Baixe e execute o instalador:
 
 ```bash
 curl -fsSLo /tmp/scripts-cert-install.sh \
@@ -47,13 +45,16 @@ curl -fsSLo /tmp/scripts-cert-install.sh \
 bash /tmp/scripts-cert-install.sh
 ```
 
-Instalar diretamente uma versão publicada:
+Os comandos ficam disponíveis no terminal após a instalação:
 
 ```bash
-bash /tmp/scripts-cert-install.sh --version v2.3.1 --yes
+trust-cert
+sudo proxmox-cert
+sudo unifi-cert
+sudo ucs-cert
 ```
 
-Listar, trocar e voltar versões:
+O instalador guarda as versões em `~/.local/share/scripts-cert/` e permite listar, trocar ou restaurar versões:
 
 ```bash
 scripts-cert-installer --list
@@ -61,9 +62,17 @@ scripts-cert-installer --use v2.3.1
 scripts-cert-installer --rollback
 ```
 
-O comando `scripts-cert-installer` é preservado junto da instalação. As versões e o histórico ficam em `~/.local/share/scripts-cert/`.
+Para instalar diretamente uma versão publicada:
 
-Windows PowerShell com Git for Windows/Git Bash instalado:
+```bash
+bash /tmp/scripts-cert-install.sh --version v2.3.1 --yes
+```
+
+> `proxmox-cert`, `unifi-cert` e `ucs-cert` devem ser executados no servidor correspondente. O `trust-cert` pode ser usado no computador que acessa esses servidores.
+
+### Windows
+
+Requer o Git for Windows, que inclui o Git Bash. No PowerShell, execute:
 
 ```powershell
 $installer = "$env:TEMP\scripts-cert-install.ps1"
@@ -73,7 +82,7 @@ Invoke-WebRequest `
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
 ```
 
-Comandos de versão no Windows:
+Para gerenciar versões:
 
 ```powershell
 scripts-cert-installer -List
@@ -82,26 +91,17 @@ scripts-cert-installer -Use v2.3.1
 scripts-cert-installer -Rollback
 ```
 
-No Windows, os atalhos chamam os arquivos Bash por meio do Git Bash. `proxmox-cert`, `unifi-cert` e `ucs-cert` continuam destinados aos respectivos servidores Linux. O `trust-cert` atualmente gerencia os repositórios de confiança do macOS e Linux; ele não importa certificados no repositório nativo do Windows.
-
-Para publicar uma versão selecionável pelos instaladores:
-
-```bash
-git tag -a v2.3.1 -m "SCRIPTS-CERT v2.3.1"
-git push origin v2.3.1
-```
-
-Depois da publicação da tag, ela aparecerá automaticamente em `--list` ou `-List`.
+No Windows, os atalhos executam os scripts pelo Git Bash. Os scripts de servidor continuam destinados ao Linux, e o `trust-cert` não altera o repositório nativo de certificados do Windows.
 
 ### Instalação manual
 
-Para executar diretamente deste diretório:
+Se você clonou o repositório e não quer usar o instalador, dê permissão de execução:
 
 ```bash
 chmod +x trust-cert.sh proxmox-cert.sh unifi-cert.sh ucs-cert.sh
 ```
 
-Instalação opcional no PATH:
+Para instalar `trust-cert` somente para o usuário atual:
 
 ```bash
 mkdir -p ~/.local/bin
@@ -109,7 +109,7 @@ cp trust-cert.sh ~/.local/bin/trust-cert
 chmod +x ~/.local/bin/trust-cert
 ```
 
-Para os scripts de servidor, use um diretório administrativo:
+Para instalar os scripts de servidor no PATH administrativo:
 
 ```bash
 sudo cp proxmox-cert.sh /usr/local/sbin/proxmox-cert
@@ -118,17 +118,48 @@ sudo cp ucs-cert.sh /usr/local/sbin/ucs-cert
 sudo chmod +x /usr/local/sbin/proxmox-cert /usr/local/sbin/unifi-cert /usr/local/sbin/ucs-cert
 ```
 
-Se `~/.local/bin` ainda não estiver no PATH, adicione ao `~/.zshrc`:
+Se `~/.local/bin` não estiver no `PATH`, adicione esta linha ao `~/.zshrc` ou `~/.bashrc`:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Recarregue:
+Depois, abra um novo terminal ou recarregue o arquivo correspondente. Por exemplo:
 
 ```bash
 source ~/.zshrc
 ```
+
+## Uso rápido
+
+Escolha o script conforme o equipamento:
+
+| Objetivo | Onde executar | Comando |
+| --- | --- | --- |
+| Confiar em um certificado | Computador cliente Linux ou macOS | `trust-cert` |
+| Criar certificado para Proxmox VE/PBS | Servidor Proxmox | `sudo proxmox-cert` |
+| Criar certificado para UniFi | Servidor UniFi self-hosted | `sudo unifi-cert` |
+| Renovar certificado do UCS | UCS Primary Directory Node | `sudo ucs-cert` |
+
+O fluxo recomendado é:
+
+1. Instale os scripts no equipamento em que serão executados.
+2. Execute o comando correspondente sem opções para usar o assistente interativo.
+3. Informe o nome completo do servidor, o nome curto e o endereço IP quando solicitado.
+4. Revise o resumo e confirme a aplicação.
+5. No computador cliente, execute `trust-cert` para confiar no certificado apresentado pelo servidor.
+
+Exemplo: depois de configurar um Proxmox no próprio servidor, confie no certificado a partir do computador usado para acessá-lo:
+
+```bash
+# No servidor Proxmox
+sudo proxmox-cert
+
+# No computador cliente Linux ou macOS
+trust-cert --host pve.lab.local --port 8006
+```
+
+Use `COMANDO --help` para consultar todas as opções e `COMANDO --version` para verificar a versão instalada.
 
 ## trust-cert
 
@@ -139,6 +170,8 @@ Uso interativo:
 ```bash
 trust-cert
 ```
+
+Informe o endereço e a porta do servidor quando o script solicitar. A porta padrão é `443`.
 
 Uso direto:
 
@@ -197,16 +230,16 @@ Backups : ~/.local/share/trust-cert/certs/
 
 Gera certificado autoassinado com SAN e aplica no Proxmox VE ou Proxmox Backup Server.
 
-Modo interativo:
+Uso interativo no servidor Proxmox:
 
 ```bash
-sudo ./proxmox-cert.sh
+sudo proxmox-cert
 ```
 
 Modo direto para PVE:
 
 ```bash
-sudo ./proxmox-cert.sh \
+sudo proxmox-cert \
   --mode pve \
   --cn pve.lab.local \
   --short pve \
@@ -216,7 +249,7 @@ sudo ./proxmox-cert.sh \
 Modo direto para PBS:
 
 ```bash
-sudo ./proxmox-cert.sh \
+sudo proxmox-cert \
   --mode pbs \
   --cn pbs.lab.local \
   --short pbs \
@@ -263,16 +296,16 @@ Export  : /root/proxmox-cert-NOME.pem
 
 Cria uma CA local, emite certificado de servidor com SAN e importa no Java Keystore do UniFi.
 
-Modo interativo:
+Uso interativo no servidor UniFi:
 
 ```bash
-sudo ./unifi-cert.sh
+sudo unifi-cert
 ```
 
 Modo direto:
 
 ```bash
-sudo ./unifi-cert.sh \
+sudo unifi-cert \
   --cn unifi.lab.local \
   --short unifi \
   --ip 10.0.1.30
@@ -323,16 +356,16 @@ Keystore : /var/lib/unifi/keystore
 
 Corrige o SAN e renova o certificado de host pela CA interna do Univention Corporate Server. Deve ser executado no Primary Directory Node, anteriormente chamado de DC Master.
 
-Modo interativo:
+Uso interativo no servidor UCS Primary Directory Node:
 
 ```bash
-sudo ./ucs-cert.sh
+sudo ucs-cert
 ```
 
 Modo direto:
 
 ```bash
-sudo ./ucs-cert.sh \
+sudo ucs-cert \
   --cn mkserver.cdl.intranet \
   --short mkserver \
   --ip 192.168.110.2
