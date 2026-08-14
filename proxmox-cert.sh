@@ -12,8 +12,8 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="proxmox-cert"
-APP_VERSION="2.3.1"
-APP_RELEASE_DATE="2026-08-03"
+APP_VERSION="2.3.2"
+APP_RELEASE_DATE="2026-08-14"
 CERT_VALIDITY="825"
 KEY_BITS="4096"
 LOG_DIR="/var/log/${APP_NAME}"
