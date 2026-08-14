@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-INSTALLER_VERSION="1.2.0"
+INSTALLER_VERSION="1.3.0"
 DEFAULT_REPO="mk-tecnologia/SCRIPTS-CERT"
 REPO="$DEFAULT_REPO"
 GITHUB_API_BASE="${SCRIPTS_CERT_API_BASE:-https://api.github.com}"
@@ -20,12 +20,20 @@ INSTALL_ROOT="${SCRIPTS_CERT_HOME:-${DATA_HOME}/scripts-cert}"
 VERSIONS_DIR="${INSTALL_ROOT}/versions"
 CURRENT_LINK="${INSTALL_ROOT}/current"
 PREVIOUS_LINK="${INSTALL_ROOT}/previous"
+MACOS_SYSTEM_BIN="false"
 if [ -n "${SCRIPTS_CERT_BIN:-}" ]; then
     BIN_DIR="$SCRIPTS_CERT_BIN"
 elif [ "$(id -u)" -eq 0 ]; then
     BIN_DIR="/usr/local/sbin"
+elif [ "$(uname -s)" = "Darwin" ]; then
+    BIN_DIR="/usr/local/bin"
+    MACOS_SYSTEM_BIN="true"
 else
     BIN_DIR="${HOME}/.local/bin"
+fi
+BIN_USE_SUDO="false"
+if [ "$MACOS_SYSTEM_BIN" = "true" ] && [ ! -w "$BIN_DIR" ]; then
+    BIN_USE_SUDO="true"
 fi
 SCRIPTS=(trust-cert proxmox-cert unifi-cert ucs-cert)
 STAGING_DIR=""
@@ -43,7 +51,7 @@ Uso:
   ./install.sh [opções]
 
 Opções:
-  --version REF          Instala uma tag/branch/commit específica (ex.: v2.3.3)
+  --version REF          Instala uma tag/branch/commit específica (ex.: v2.3.4)
   --list                 Lista versões publicadas no GitHub e versões locais
   --rollback             Volta para a versão anteriormente ativa
   --use VERSÃO           Ativa uma versão já instalada, sem baixar novamente
@@ -68,6 +76,15 @@ confirm() {
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "Comando obrigatório não encontrado: $1"
+}
+
+bin_cmd() {
+    if [ "$BIN_USE_SUDO" = "true" ]; then
+        require_cmd sudo
+        sudo "$@"
+    else
+        "$@"
+    fi
 }
 
 parse_args() {
@@ -191,15 +208,15 @@ activate_version() {
         ln -sfn "$VERSIONS_DIR/$current" "$PREVIOUS_LINK"
     fi
     ln -sfn "$target" "$CURRENT_LINK"
-    mkdir -p "$BIN_DIR"
+    bin_cmd mkdir -p "$BIN_DIR"
     for name in "${SCRIPTS[@]}"; do
-        ln -sfn "$CURRENT_LINK/${name}.sh" "$BIN_DIR/$name"
+        bin_cmd ln -sfn "$CURRENT_LINK/${name}.sh" "$BIN_DIR/$name"
     done
     if [ -f "$0" ] && { [ ! -f "$INSTALL_ROOT/install.sh" ] || [ ! "$0" -ef "$INSTALL_ROOT/install.sh" ]; }; then
         cp "$0" "$INSTALL_ROOT/install.sh"
         chmod 755 "$INSTALL_ROOT/install.sh"
     fi
-    [ -f "$INSTALL_ROOT/install.sh" ] && ln -sfn "$INSTALL_ROOT/install.sh" "$BIN_DIR/scripts-cert-installer"
+    [ -f "$INSTALL_ROOT/install.sh" ] && bin_cmd ln -sfn "$INSTALL_ROOT/install.sh" "$BIN_DIR/scripts-cert-installer"
     ok "Versão ativa: $version"
 }
 
@@ -263,9 +280,9 @@ uninstall_all() {
     local name=""
     confirm "Remover todos os scripts e versões de $INSTALL_ROOT?" || { warn "Cancelado."; return 0; }
     for name in "${SCRIPTS[@]}"; do
-        [ -L "$BIN_DIR/$name" ] && rm -f "$BIN_DIR/$name"
+        [ -L "$BIN_DIR/$name" ] && bin_cmd rm -f "$BIN_DIR/$name"
     done
-    [ -L "$BIN_DIR/scripts-cert-installer" ] && rm -f "$BIN_DIR/scripts-cert-installer"
+    [ -L "$BIN_DIR/scripts-cert-installer" ] && bin_cmd rm -f "$BIN_DIR/scripts-cert-installer"
     case "$INSTALL_ROOT" in
         "${DATA_HOME}/scripts-cert"|"${SCRIPTS_CERT_HOME:-__unset__}") rm -rf "$INSTALL_ROOT" ;;
         *) die "Diretório personalizado não removido por segurança: $INSTALL_ROOT" ;;

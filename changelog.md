@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.3.4 — 2026-08-14
+
+### Instalador
+
+- Alterada a instalação no macOS para criar os comandos em `/usr/local/bin`, tornando-os disponíveis imediatamente no terminal.
+- Adicionado uso de `sudo` somente quando necessário para criar ou remover os atalhos em `/usr/local/bin`.
+
 ## v2.3.3 — 2026-08-14
 
 ### Instalador
