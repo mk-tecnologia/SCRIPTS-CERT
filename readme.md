@@ -1,6 +1,6 @@
 # SCRIPTS-CERT
 
-Versão atual dos scripts: **2.3.4** — 2026-08-14. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
+Versão atual dos scripts: **2.3.5** — 2026-08-14. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
 
 Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos. Todos podem ser usados de forma interativa: execute o comando e responda às perguntas.
 
@@ -60,14 +60,14 @@ O instalador guarda as versões em `~/.local/share/scripts-cert/` e permite list
 
 ```bash
 scripts-cert-installer --list
-scripts-cert-installer --use v2.3.4
+scripts-cert-installer --use v2.3.5
 scripts-cert-installer --rollback
 ```
 
 Para instalar diretamente uma versão publicada:
 
 ```bash
-bash /tmp/scripts-cert-install.sh --version v2.3.4 --yes
+bash /tmp/scripts-cert-install.sh --version v2.3.5 --yes
 ```
 
 > `proxmox-cert`, `unifi-cert` e `ucs-cert` devem ser executados no servidor correspondente. O `trust-cert` pode ser usado no computador que acessa esses servidores.
@@ -88,12 +88,40 @@ Para gerenciar versões:
 
 ```powershell
 scripts-cert-installer -List
-scripts-cert-installer -Version v2.3.4 -Yes
-scripts-cert-installer -Use v2.3.4
+scripts-cert-installer -Version v2.3.5 -Yes
+scripts-cert-installer -Use v2.3.5
 scripts-cert-installer -Rollback
 ```
 
 No Windows, os atalhos executam os scripts pelo Git Bash. Os scripts de servidor continuam destinados ao Linux, e o `trust-cert` não altera o repositório nativo de certificados do Windows.
+
+### Desinstalação
+
+No Linux ou macOS:
+
+```bash
+scripts-cert-installer --uninstall
+```
+
+O desinstalador pede confirmação e remove:
+
+- os comandos `trust-cert`, `proxmox-cert`, `unifi-cert` e `ucs-cert`;
+- o comando `scripts-cert-installer`;
+- as versões baixadas em `~/.local/share/scripts-cert/`.
+
+Somente atalhos que apontam para esta instalação são removidos. Arquivos com o mesmo nome que não pertencem ao SCRIPTS-CERT são preservados.
+
+Certificados já aplicados, CAs, backups e logs também são preservados para evitar perda de acesso ou dados. Para remover um certificado confiável antes de desinstalar, use:
+
+```bash
+trust-cert --remove --host SERVIDOR --port PORTA
+```
+
+No Windows PowerShell:
+
+```powershell
+scripts-cert-installer -Uninstall
+```
 
 ### Instalação manual
 
