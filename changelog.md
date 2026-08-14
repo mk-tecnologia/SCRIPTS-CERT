@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.3.3 — 2026-08-14
+
+### Instalador
+
+- Alterada a instalação executada como `root` para criar os comandos em `/usr/local/sbin`, permitindo usá-los imediatamente sem configurar o `PATH`.
+- Mantida a instalação em `~/.local/bin` para usuários comuns e adicionada confirmação explícita do diretório dos comandos.
+
 ## v2.3.2 — 2026-08-14
 
 ### Geral

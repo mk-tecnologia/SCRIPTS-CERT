@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-INSTALLER_VERSION="1.1.0"
+INSTALLER_VERSION="1.2.0"
 DEFAULT_REPO="mk-tecnologia/SCRIPTS-CERT"
 REPO="$DEFAULT_REPO"
 GITHUB_API_BASE="${SCRIPTS_CERT_API_BASE:-https://api.github.com}"
@@ -20,7 +20,13 @@ INSTALL_ROOT="${SCRIPTS_CERT_HOME:-${DATA_HOME}/scripts-cert}"
 VERSIONS_DIR="${INSTALL_ROOT}/versions"
 CURRENT_LINK="${INSTALL_ROOT}/current"
 PREVIOUS_LINK="${INSTALL_ROOT}/previous"
-BIN_DIR="${SCRIPTS_CERT_BIN:-${HOME}/.local/bin}"
+if [ -n "${SCRIPTS_CERT_BIN:-}" ]; then
+    BIN_DIR="$SCRIPTS_CERT_BIN"
+elif [ "$(id -u)" -eq 0 ]; then
+    BIN_DIR="/usr/local/sbin"
+else
+    BIN_DIR="${HOME}/.local/bin"
+fi
 SCRIPTS=(trust-cert proxmox-cert unifi-cert ucs-cert)
 STAGING_DIR=""
 
@@ -37,7 +43,7 @@ Uso:
   ./install.sh [opções]
 
 Opções:
-  --version REF          Instala uma tag/branch/commit específica (ex.: v2.3.2)
+  --version REF          Instala uma tag/branch/commit específica (ex.: v2.3.3)
   --list                 Lista versões publicadas no GitHub e versões locais
   --rollback             Volta para a versão anteriormente ativa
   --use VERSÃO           Ativa uma versão já instalada, sem baixar novamente
@@ -235,6 +241,8 @@ install_version() {
     if ! printf '%s' ":${PATH}:" | grep -Fq ":${BIN_DIR}:"; then
         warn "$BIN_DIR não está no PATH. Adicione ao perfil do shell:"
         echo "  export PATH=\"${BIN_DIR}:\$PATH\""
+    else
+        ok "Comandos disponíveis em $BIN_DIR"
     fi
 }
 
