@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.3.5 — 2026-08-14
+
+### Instalador
+
+- Reforçada a desinstalação para remover atalhos gerenciados em todos os diretórios usados pelas versões atuais e anteriores.
+- Adicionada proteção para preservar arquivos e atalhos que não apontam para a instalação do SCRIPTS-CERT.
+- Documentado o processo de desinstalação e quais dados são preservados.
+
 ## v2.3.4 — 2026-08-14
 
 ### Instalador

@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-INSTALLER_VERSION="1.3.0"
+INSTALLER_VERSION="1.4.0"
 DEFAULT_REPO="mk-tecnologia/SCRIPTS-CERT"
 REPO="$DEFAULT_REPO"
 GITHUB_API_BASE="${SCRIPTS_CERT_API_BASE:-https://api.github.com}"
@@ -51,7 +51,7 @@ Uso:
   ./install.sh [opções]
 
 Opções:
-  --version REF          Instala uma tag/branch/commit específica (ex.: v2.3.4)
+  --version REF          Instala uma tag/branch/commit específica (ex.: v2.3.5)
   --list                 Lista versões publicadas no GitHub e versões locais
   --rollback             Volta para a versão anteriormente ativa
   --use VERSÃO           Ativa uma versão já instalada, sem baixar novamente
@@ -277,17 +277,35 @@ rollback_version() {
 }
 
 uninstall_all() {
-    local name=""
+    local name="" directory="" link="" target=""
+    local bin_directories=("$BIN_DIR" "${HOME}/.local/bin" "/usr/local/bin" "/usr/local/sbin")
     confirm "Remover todos os scripts e versões de $INSTALL_ROOT?" || { warn "Cancelado."; return 0; }
-    for name in "${SCRIPTS[@]}"; do
-        [ -L "$BIN_DIR/$name" ] && bin_cmd rm -f "$BIN_DIR/$name"
+
+    for directory in "${bin_directories[@]}"; do
+        for name in "${SCRIPTS[@]}" scripts-cert-installer; do
+            link="$directory/$name"
+            [ -L "$link" ] || continue
+            target=$(readlink "$link")
+            case "$target" in
+                "$INSTALL_ROOT"/*)
+                    if [ -w "$directory" ]; then
+                        rm -f "$link"
+                    else
+                        require_cmd sudo
+                        sudo rm -f "$link"
+                    fi
+                    ;;
+                *) warn "Atalho não gerenciado preservado: $link" ;;
+            esac
+        done
     done
-    [ -L "$BIN_DIR/scripts-cert-installer" ] && bin_cmd rm -f "$BIN_DIR/scripts-cert-installer"
+
     case "$INSTALL_ROOT" in
         "${DATA_HOME}/scripts-cert"|"${SCRIPTS_CERT_HOME:-__unset__}") rm -rf "$INSTALL_ROOT" ;;
         *) die "Diretório personalizado não removido por segurança: $INSTALL_ROOT" ;;
     esac
-    ok "SCRIPTS-CERT removido."
+    ok "SCRIPTS-CERT e seus atalhos foram removidos."
+    info "Certificados, CAs, backups e logs criados durante o uso foram preservados."
 }
 
 main() {
