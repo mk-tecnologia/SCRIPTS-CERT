@@ -1,6 +1,6 @@
 # SCRIPTS-CERT
 
-Versão atual dos scripts: **2.3.3** — 2026-08-14. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
+Versão atual dos scripts: **2.3.4** — 2026-08-14. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
 
 Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos. Todos podem ser usados de forma interativa: execute o comando e responda às perguntas.
 
@@ -54,20 +54,20 @@ sudo unifi-cert
 sudo ucs-cert
 ```
 
-Quando executado como `root`, o instalador cria os comandos em `/usr/local/sbin`, que já faz parte do `PATH` administrativo. Para usuários comuns, usa `~/.local/bin`.
+No macOS, o instalador cria os comandos em `/usr/local/bin` e solicita `sudo` somente se necessário. No Linux, usa `/usr/local/sbin` quando executado como `root` e `~/.local/bin` para usuários comuns.
 
 O instalador guarda as versões em `~/.local/share/scripts-cert/` e permite listar, trocar ou restaurar versões:
 
 ```bash
 scripts-cert-installer --list
-scripts-cert-installer --use v2.3.3
+scripts-cert-installer --use v2.3.4
 scripts-cert-installer --rollback
 ```
 
 Para instalar diretamente uma versão publicada:
 
 ```bash
-bash /tmp/scripts-cert-install.sh --version v2.3.3 --yes
+bash /tmp/scripts-cert-install.sh --version v2.3.4 --yes
 ```
 
 > `proxmox-cert`, `unifi-cert` e `ucs-cert` devem ser executados no servidor correspondente. O `trust-cert` pode ser usado no computador que acessa esses servidores.
@@ -88,8 +88,8 @@ Para gerenciar versões:
 
 ```powershell
 scripts-cert-installer -List
-scripts-cert-installer -Version v2.3.3 -Yes
-scripts-cert-installer -Use v2.3.3
+scripts-cert-installer -Version v2.3.4 -Yes
+scripts-cert-installer -Use v2.3.4
 scripts-cert-installer -Rollback
 ```
 
