@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.5.2 — 2026-08-30
+
+### unifi-cert.sh
+
+- Removida também no modo legado a pergunta automática sobre `/etc/hosts`.
+- A alteração local agora ocorre exclusivamente quando `--add-hosts` é informado.
+
 ## v2.5.1 — 2026-08-30
 
 ### unifi-cert.sh

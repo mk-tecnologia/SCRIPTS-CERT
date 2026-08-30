@@ -12,7 +12,7 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="unifi-cert"
-APP_VERSION="2.5.1"
+APP_VERSION="2.5.2"
 APP_RELEASE_DATE="2026-08-30"
 UNIFI_ALIAS="unifi"
 KEYSTORE="/var/lib/unifi/keystore"
@@ -699,8 +699,8 @@ update_hosts() {
     step "Verificando /etc/hosts"
     local line="${IP}  ${CN}  ${SHORT_NAME}"
 
-    if [ "$PLATFORM" = "unifios-server" ] && [ "$ADD_HOSTS" = "ask" ]; then
-        info "UniFi OS Server: /etc/hosts não será alterado; configure o nome no DNS dos clientes."
+    if [ "$ADD_HOSTS" = "ask" ]; then
+        info "/etc/hosts não será alterado; use --add-hosts somente se desejar essa alteração local."
         return 0
     fi
 
@@ -797,7 +797,9 @@ main() {
         install_unifios_server_certificate
         activate_and_verify_unifios_server
     fi
-    update_hosts
+    if [ "$ADD_HOSTS" = "yes" ]; then
+        update_hosts
+    fi
     log_msg "COMPLETED platform=$PLATFORM cn=$CN short=$SHORT_NAME ip=$IP days=$CERT_VALIDITY ca=$CA_DIR/ca.crt"
     RUN_COMPLETE="true"
     if [ "$PLATFORM" = "legacy" ]; then final_instructions; else final_instructions_unifios; fi

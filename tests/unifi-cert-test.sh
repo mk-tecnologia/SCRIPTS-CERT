@@ -27,12 +27,14 @@ trap 'rm -rf "$TEST_ROOT"' EXIT
     check_dependencies
 )
 
-(
-    PLATFORM="unifios-server"
-    ADD_HOSTS="ask"
-    grep() { error "O modo UniFi OS Server não deve consultar /etc/hosts por padrão"; }
-    update_hosts
-)
+for test_platform in legacy unifios-server; do
+    (
+        PLATFORM="$test_platform"
+        ADD_HOSTS="ask"
+        grep() { error "O script não deve consultar /etc/hosts por padrão"; }
+        update_hosts
+    )
+done
 
 PLATFORM="unifios-server"
 CA_DIR="$TEST_ROOT/ca"
