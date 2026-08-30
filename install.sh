@@ -6,7 +6,8 @@
 
 set -euo pipefail
 
-INSTALLER_VERSION="1.4.0"
+INSTALLER_VERSION="1.5.0"
+MAX_REMOTE_VERSIONS="5"
 DEFAULT_REPO="mk-tecnologia/SCRIPTS-CERT"
 REPO="$DEFAULT_REPO"
 GITHUB_API_BASE="${SCRIPTS_CERT_API_BASE:-https://api.github.com}"
@@ -55,6 +56,7 @@ Opções:
   --list                 Lista versões publicadas no GitHub e versões locais
   --rollback             Volta para a versão anteriormente ativa
   --use VERSÃO           Ativa uma versão já instalada, sem baixar novamente
+  --prune                Remove versões locais fora de ativa/anterior
   --uninstall            Remove os atalhos e todas as versões locais
   --repo DONO/REPO       Usa outro repositório GitHub
   -y, --yes              Não pede confirmação
@@ -62,7 +64,8 @@ Opções:
   --installer-version    Exibe a versão do instalador
 
 Sem --version, o instalador oferece as tags disponíveis. Se não houver tags,
-usa a branch main. As versões ficam em:
+usa a branch main. Apenas as ${MAX_REMOTE_VERSIONS} tags mais recentes são exibidas.
+Localmente são preservadas somente a versão ativa e a anterior para rollback:
   ${VERSIONS_DIR}/
 EOF
 }
@@ -94,6 +97,7 @@ parse_args() {
             --list) ACTION="list"; shift ;;
             --rollback) ACTION="rollback"; shift ;;
             --use) [ "$#" -ge 2 ] || die "Faltou o valor de --use"; ACTION="use"; REQUESTED_VERSION="$2"; shift 2 ;;
+            --prune) ACTION="prune"; shift ;;
             --uninstall) ACTION="uninstall"; shift ;;
             --repo) [ "$#" -ge 2 ] || die "Faltou o valor de --repo"; REPO="$2"; shift 2 ;;
             -y|--yes) ASSUME_YES="true"; shift ;;
@@ -109,7 +113,8 @@ github_tags() {
     curl -fsSL --connect-timeout 10 --max-time 30 \
         -H 'Accept: application/vnd.github+json' \
         "${GITHUB_API_BASE}/repos/${REPO}/tags?per_page=100" 2>/dev/null \
-        | sed -n 's/^[[:space:]]*"name":[[:space:]]*"\([^"]*\)".*/\1/p'
+        | sed -n 's/^[[:space:]]*"name":[[:space:]]*"\([^"]*\)".*/\1/p' \
+        | sed -n "1,${MAX_REMOTE_VERSIONS}p"
 }
 
 local_versions() {
@@ -128,6 +133,30 @@ link_version_name() {
     [ -L "$link" ] || return 0
     target=$(readlink "$link")
     basename "$target"
+}
+
+prune_local_versions() {
+    local current="" previous="" version="" directory="" removed="0"
+    current=$(link_version_name "$CURRENT_LINK")
+    previous=$(link_version_name "$PREVIOUS_LINK")
+    [ -d "$VERSIONS_DIR" ] || return 0
+    while IFS= read -r version; do
+        [ -n "$version" ] || continue
+        [ "$version" = "$current" ] && continue
+        [ "$version" = "$previous" ] && continue
+        directory="$VERSIONS_DIR/$version"
+        case "$directory" in
+            "$VERSIONS_DIR"/*) rm -rf "$directory" ;;
+            *) die "Caminho recusado durante limpeza: $directory" ;;
+        esac
+        info "Versão local removida: $version"
+        removed=$((removed + 1))
+    done <<EOF_LOCAL
+$(local_versions)
+EOF_LOCAL
+    if [ "$removed" -gt 0 ]; then
+        ok "Limpeza concluída; ativa e anterior foram preservadas."
+    fi
 }
 
 list_versions() {
@@ -218,6 +247,7 @@ activate_version() {
     fi
     [ -f "$INSTALL_ROOT/install.sh" ] && bin_cmd ln -sfn "$INSTALL_ROOT/install.sh" "$BIN_DIR/scripts-cert-installer"
     ok "Versão ativa: $version"
+    prune_local_versions
 }
 
 install_version() {
@@ -274,6 +304,7 @@ rollback_version() {
         ln -sfn "$VERSIONS_DIR/$current" "$PREVIOUS_LINK"
     fi
     ok "Rollback concluído: $previous está ativa."
+    prune_local_versions
 }
 
 uninstall_all() {
@@ -315,6 +346,7 @@ main() {
         list) require_cmd curl; list_versions ;;
         rollback) rollback_version ;;
         use) activate_version "$REQUESTED_VERSION" ;;
+        prune) prune_local_versions ;;
         uninstall) uninstall_all ;;
         *) die "Ação inválida: $ACTION" ;;
     esac

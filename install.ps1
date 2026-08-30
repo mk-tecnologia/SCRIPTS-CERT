@@ -9,6 +9,7 @@ param(
     [Parameter(ParameterSetName = 'Use', Mandatory = $true)][string]$Use,
     [Parameter(ParameterSetName = 'List', Mandatory = $true)][switch]$List,
     [Parameter(ParameterSetName = 'Rollback', Mandatory = $true)][switch]$Rollback,
+    [Parameter(ParameterSetName = 'Prune', Mandatory = $true)][switch]$Prune,
     [Parameter(ParameterSetName = 'Uninstall', Mandatory = $true)][switch]$Uninstall,
     [string]$Repo = 'mk-tecnologia/SCRIPTS-CERT',
     [switch]$Yes,
@@ -16,7 +17,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$InstallerVersion = '1.1.0'
+$InstallerVersion = '1.2.0'
+$MaxRemoteVersions = 5
 $InstallRoot = if ($env:SCRIPTS_CERT_HOME) { $env:SCRIPTS_CERT_HOME } else { Join-Path $env:LOCALAPPDATA 'Programs\ScriptsCert' }
 $VersionsDir = Join-Path $InstallRoot 'versions'
 $BinDir = Join-Path $InstallRoot 'bin'
@@ -45,7 +47,7 @@ function Confirm-Action([string]$Message) {
 function Get-GitHubTags {
     try {
         $headers = @{ Accept = 'application/vnd.github+json' }
-        return @((Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$Repo/tags?per_page=100" -TimeoutSec 30) | ForEach-Object { $_.name })
+        return @((Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$Repo/tags?per_page=100" -TimeoutSec 30) | Select-Object -First $MaxRemoteVersions | ForEach-Object { $_.name })
     }
     catch {
         Write-Warn "Nao foi possivel consultar tags: $($_.Exception.Message)"
@@ -61,6 +63,17 @@ function Get-LocalVersions {
 function Read-State([string]$Path) {
     if (Test-Path $Path) { return (Get-Content -Path $Path -Raw).Trim() }
     return ''
+}
+
+function Remove-OldVersions {
+    $current = Read-State $CurrentFile
+    $previous = Read-State $PreviousFile
+    foreach ($item in @(Get-LocalVersions)) {
+        if ($item -eq $current -or $item -eq $previous) { continue }
+        $directory = Join-Path $VersionsDir $item
+        Remove-Item -LiteralPath $directory -Recurse -Force
+        Write-Info "Versao local removida: $item"
+    }
 }
 
 function Find-GitBash {
@@ -120,6 +133,7 @@ function Set-ActiveVersion([string]$TargetVersion) {
     [IO.File]::WriteAllText($CurrentFile, $TargetVersion)
     Write-Wrappers $TargetVersion
     Write-Ok "Versao ativa: $TargetVersion"
+    Remove-OldVersions
 }
 
 function Select-RemoteVersion {
@@ -207,6 +221,7 @@ function Invoke-Rollback {
     if ($current) { [IO.File]::WriteAllText($PreviousFile, $current) }
     Write-Wrappers $previous
     Write-Ok "Rollback concluido: $previous esta ativa."
+    Remove-OldVersions
 }
 
 function Uninstall-All {
@@ -222,5 +237,6 @@ switch ($PSCmdlet.ParameterSetName) {
     'Use' { Set-ActiveVersion $Use }
     'List' { Show-Versions }
     'Rollback' { Invoke-Rollback }
+    'Prune' { Remove-OldVersions }
     'Uninstall' { Uninstall-All }
 }

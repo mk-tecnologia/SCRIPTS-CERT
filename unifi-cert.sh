@@ -12,7 +12,7 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="unifi-cert"
-APP_VERSION="2.4.2"
+APP_VERSION="2.5.0"
 APP_RELEASE_DATE="2026-08-30"
 UNIFI_ALIAS="unifi"
 KEYSTORE="/var/lib/unifi/keystore"

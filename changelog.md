@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.5.0 — 2026-08-30
+
+### Instalador
+
+- Limitada a seleção às cinco tags mais recentes publicadas no GitHub.
+- Adicionada limpeza automática de versões locais, preservando apenas a ativa e a anterior para rollback.
+- Adicionados `--prune` no Bash e `-Prune` no PowerShell para executar a limpeza manualmente.
+- Retiradas as tags v2.4.0 e v2.4.1, substituídas pelas correções posteriores.
+
 ## v2.4.2 — 2026-08-30
 
 ### unifi-cert.sh

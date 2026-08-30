@@ -12,7 +12,7 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="trust-cert"
-APP_VERSION="2.4.2"
+APP_VERSION="2.5.0"
 APP_RELEASE_DATE="2026-08-30"
 DEFAULT_PORT="443"
 LOG_DIR="${HOME}/.local/state/trust-cert"
