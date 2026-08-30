@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.4.1 — 2026-08-30
+
+### unifi-cert.sh
+
+- Adicionada detecção automática entre `uosserver.service` e `unifi.service`.
+- Corrigida a execução sem `--platform` no UniFi OS Server, que exigia `keytool` incorretamente.
+
 ## v2.4.0 — 2026-08-30
 
 ### unifi-cert.sh

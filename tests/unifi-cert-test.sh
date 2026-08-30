@@ -9,6 +9,15 @@ TEST_ROOT=$(mktemp -d "/tmp/unifi-cert-test_XXXXXX")
 source "$PROJECT_ROOT/unifi-cert.sh"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
+(
+    PLATFORM="auto"
+    systemctl() {
+        [ "$*" = "show --property=LoadState --value uosserver.service" ] && printf 'loaded\n'
+    }
+    detect_platform
+    [ "$PLATFORM" = "unifios-server" ]
+)
+
 PLATFORM="unifios-server"
 CA_DIR="$TEST_ROOT/ca"
 BACKUP_DIR="$TEST_ROOT/backups"

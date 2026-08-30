@@ -12,7 +12,7 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="unifi-cert"
-APP_VERSION="2.4.0"
+APP_VERSION="2.4.1"
 APP_RELEASE_DATE="2026-08-30"
 UNIFI_ALIAS="unifi"
 KEYSTORE="/var/lib/unifi/keystore"
@@ -24,7 +24,7 @@ SERVER_KEY_BITS="2048"
 CA_KEY_BITS="4096"
 LOG_DIR="/var/log/${APP_NAME}"
 BACKUP_DIR="/var/backups/${APP_NAME}"
-PLATFORM="legacy"
+PLATFORM="auto"
 UOS_DATA_DIR="/home/uosserver/.local/share/containers/storage/volumes/uosserver_data/_data"
 UOS_CONFIG_DIR=""
 UOS_CERT_FILE=""
@@ -81,7 +81,7 @@ Opções:
   --cn FQDN              Nome completo do servidor
   --short NOME           Nome curto / alias DNS extra
   --ip IP                IP do servidor
-  --platform ALVO        legacy ou unifios-server (padrão: legacy)
+  --platform ALVO        auto, legacy ou unifios-server (padrão: auto)
   --uos-data-dir CAMINHO Volume de dados do UniFi OS Server
   --keystore CAMINHO     Caminho do keystore UniFi (padrão: ${KEYSTORE})
   --storepass SENHA      Senha do keystore (padrão UniFi)
@@ -163,6 +163,20 @@ require_cmd() { command -v "$1" >/dev/null 2>&1 || error "Comando obrigatório n
 
 unifi_service_exists() {
     [ "$(systemctl show --property=LoadState --value unifi.service 2>/dev/null || true)" = "loaded" ]
+}
+
+detect_platform() {
+    [ "$PLATFORM" = "auto" ] || return 0
+    step "Detectando plataforma UniFi"
+    if [ "$(systemctl show --property=LoadState --value uosserver.service 2>/dev/null || true)" = "loaded" ]; then
+        PLATFORM="unifios-server"
+        success "UniFi OS Server self-hosted detectado"
+    elif unifi_service_exists; then
+        PLATFORM="legacy"
+        success "UniFi Network Application legado detectado"
+    else
+        error "Nenhuma instalação compatível encontrada (uosserver.service ou unifi.service)."
+    fi
 }
 
 check_dependencies() {
@@ -258,8 +272,8 @@ parse_args() {
         esac
     done
     case "$PLATFORM" in
-        legacy|unifios-server) ;;
-        *) error "Plataforma inválida: $PLATFORM (use legacy ou unifios-server)" ;;
+        auto|legacy|unifios-server) ;;
+        *) error "Plataforma inválida: $PLATFORM (use auto, legacy ou unifios-server)" ;;
     esac
 }
 
@@ -760,6 +774,8 @@ main() {
     parse_args "$@"
     print_header
     require_root
+    require_cmd systemctl
+    detect_platform
     check_dependencies
     check_unifi
     collect_config

@@ -1,6 +1,6 @@
 # SCRIPTS-CERT
 
-Versão atual dos scripts: **2.4.0** — 2026-08-30. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
+Versão atual dos scripts: **2.4.1** — 2026-08-30. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
 
 Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos. Todos podem ser usados de forma interativa: execute o comando e responda às perguntas.
 
@@ -61,14 +61,14 @@ O instalador guarda as versões em `~/.local/share/scripts-cert/` e permite list
 
 ```bash
 scripts-cert-installer --list
-scripts-cert-installer --use v2.4.0
+scripts-cert-installer --use v2.4.1
 scripts-cert-installer --rollback
 ```
 
 Para instalar diretamente uma versão publicada:
 
 ```bash
-bash /tmp/scripts-cert-install.sh --version v2.4.0 --yes
+bash /tmp/scripts-cert-install.sh --version v2.4.1 --yes
 ```
 
 > `proxmox-cert`, `unifi-cert` e `ucs-cert` devem ser executados no servidor correspondente. O `trust-cert` pode ser usado no computador que acessa esses servidores.
@@ -89,8 +89,8 @@ Para gerenciar versões:
 
 ```powershell
 scripts-cert-installer -List
-scripts-cert-installer -Version v2.4.0 -Yes
-scripts-cert-installer -Use v2.4.0
+scripts-cert-installer -Version v2.4.1 -Yes
+scripts-cert-installer -Use v2.4.1
 scripts-cert-installer -Rollback
 ```
 
@@ -380,7 +380,7 @@ Opções:
 --cn FQDN              Nome completo do servidor
 --short NOME           Nome curto / alias DNS extra
 --ip IP                IP do servidor
---platform ALVO        legacy ou unifios-server
+--platform ALVO        auto, legacy ou unifios-server
 --uos-data-dir CAMINHO Volume de dados do UniFi OS Server
 --keystore CAMINHO     Caminho do keystore UniFi
 --storepass SENHA      Senha do keystore
@@ -402,6 +402,7 @@ Comportamento comum aos dois modos:
 - Reutiliza a mesma CA nas próximas renovações.
 - Gera certificado do servidor com SAN.
 - Valida a CA, a cadeia, os SANs e a correspondência das chaves.
+- Detecta automaticamente `uosserver.service` ou `unifi.service` quando `--platform` não é informado.
 
 No modo `legacy`:
 
