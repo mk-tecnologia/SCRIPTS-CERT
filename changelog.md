@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.4.2 — 2026-08-30
+
+### unifi-cert.sh
+
+- Corrigida a verificação de dependências para exigir `keytool` somente no modo legado.
+- Adicionado teste de regressão garantindo que o UniFi OS Server funcione sem Java.
+
 ## v2.4.1 — 2026-08-30
 
 ### unifi-cert.sh

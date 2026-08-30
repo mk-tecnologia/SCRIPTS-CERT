@@ -1,6 +1,6 @@
 # SCRIPTS-CERT
 
-Versão atual dos scripts: **2.4.1** — 2026-08-30. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
+Versão atual dos scripts: **2.4.2** — 2026-08-30. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
 
 Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos. Todos podem ser usados de forma interativa: execute o comando e responda às perguntas.
 
@@ -61,14 +61,14 @@ O instalador guarda as versões em `~/.local/share/scripts-cert/` e permite list
 
 ```bash
 scripts-cert-installer --list
-scripts-cert-installer --use v2.4.1
+scripts-cert-installer --use v2.4.2
 scripts-cert-installer --rollback
 ```
 
 Para instalar diretamente uma versão publicada:
 
 ```bash
-bash /tmp/scripts-cert-install.sh --version v2.4.1 --yes
+bash /tmp/scripts-cert-install.sh --version v2.4.2 --yes
 ```
 
 > `proxmox-cert`, `unifi-cert` e `ucs-cert` devem ser executados no servidor correspondente. O `trust-cert` pode ser usado no computador que acessa esses servidores.
@@ -89,8 +89,8 @@ Para gerenciar versões:
 
 ```powershell
 scripts-cert-installer -List
-scripts-cert-installer -Version v2.4.1 -Yes
-scripts-cert-installer -Use v2.4.1
+scripts-cert-installer -Version v2.4.2 -Yes
+scripts-cert-installer -Use v2.4.2
 scripts-cert-installer -Rollback
 ```
 

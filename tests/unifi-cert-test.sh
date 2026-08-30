@@ -18,6 +18,15 @@ trap 'rm -rf "$TEST_ROOT"' EXIT
     [ "$PLATFORM" = "unifios-server" ]
 )
 
+(
+    PLATFORM="unifios-server"
+    require_cmd() {
+        [ "$1" != "keytool" ] || error "keytool não deve ser exigido no UniFi OS Server"
+        return 0
+    }
+    check_dependencies
+)
+
 PLATFORM="unifios-server"
 CA_DIR="$TEST_ROOT/ca"
 BACKUP_DIR="$TEST_ROOT/backups"

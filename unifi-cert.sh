@@ -12,7 +12,7 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="unifi-cert"
-APP_VERSION="2.4.1"
+APP_VERSION="2.4.2"
 APP_RELEASE_DATE="2026-08-30"
 UNIFI_ALIAS="unifi"
 KEYSTORE="/var/lib/unifi/keystore"
@@ -188,11 +188,11 @@ check_dependencies() {
     require_cmd sed
     require_cmd cut
     require_cmd tr
-    if [ "$PLATFORM" = "legacy" ] || [ "$PLATFORM" = "unifios-server" ]; then
+    require_cmd systemctl
+    require_cmd seq
+    require_cmd sleep
+    if [ "$PLATFORM" = "legacy" ]; then
         require_cmd keytool
-        require_cmd systemctl
-        require_cmd seq
-        require_cmd sleep
         keytool -help >/dev/null 2>&1 || error "keytool encontrado, mas o runtime Java não está funcional."
     fi
     success "Dependências disponíveis"
