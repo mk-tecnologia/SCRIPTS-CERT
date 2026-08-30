@@ -1,6 +1,6 @@
 # SCRIPTS-CERT
 
-Versão atual dos scripts: **2.5.0** — 2026-08-30. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
+Versão atual dos scripts: **2.5.1** — 2026-08-30. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
 
 Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos. Todos podem ser usados de forma interativa: execute o comando e responda às perguntas.
 
@@ -61,7 +61,7 @@ O instalador guarda as versões em `~/.local/share/scripts-cert/` e permite list
 
 ```bash
 scripts-cert-installer --list
-scripts-cert-installer --use v2.5.0
+scripts-cert-installer --use v2.5.1
 scripts-cert-installer --rollback
 scripts-cert-installer --prune
 ```
@@ -69,7 +69,7 @@ scripts-cert-installer --prune
 Para instalar diretamente uma versão publicada:
 
 ```bash
-bash /tmp/scripts-cert-install.sh --version v2.5.0 --yes
+bash /tmp/scripts-cert-install.sh --version v2.5.1 --yes
 ```
 
 > `proxmox-cert`, `unifi-cert` e `ucs-cert` devem ser executados no servidor correspondente. O `trust-cert` pode ser usado no computador que acessa esses servidores.
@@ -90,8 +90,8 @@ Para gerenciar versões:
 
 ```powershell
 scripts-cert-installer -List
-scripts-cert-installer -Version v2.5.0 -Yes
-scripts-cert-installer -Use v2.5.0
+scripts-cert-installer -Version v2.5.1 -Yes
+scripts-cert-installer -Use v2.5.1
 scripts-cert-installer -Rollback
 scripts-cert-installer -Prune
 ```
@@ -423,6 +423,7 @@ No modo `unifios-server`:
 - Faz backup dos certificados anteriores e da CA.
 - Reinicia o serviço e procura o novo fingerprint nas portas 443 e 11443.
 - Restaura os arquivos anteriores automaticamente se a inicialização ou a verificação falhar.
+- Não altera `/etc/hosts` nem pergunta sobre isso, salvo quando `--add-hosts` é informado explicitamente.
 
 Arquivos:
 

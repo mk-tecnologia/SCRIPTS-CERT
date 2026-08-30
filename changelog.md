@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.5.1 — 2026-08-30
+
+### unifi-cert.sh
+
+- Removida a pergunta desnecessária sobre `/etc/hosts` no modo UniFi OS Server.
+- Mantida a alteração explícita por meio de `--add-hosts`.
+
 ## v2.5.0 — 2026-08-30
 
 ### Instalador

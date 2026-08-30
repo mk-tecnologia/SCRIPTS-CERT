@@ -12,7 +12,7 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="unifi-cert"
-APP_VERSION="2.5.0"
+APP_VERSION="2.5.1"
 APP_RELEASE_DATE="2026-08-30"
 UNIFI_ALIAS="unifi"
 KEYSTORE="/var/lib/unifi/keystore"
@@ -698,6 +698,11 @@ activate_and_verify_unifios_server() {
 update_hosts() {
     step "Verificando /etc/hosts"
     local line="${IP}  ${CN}  ${SHORT_NAME}"
+
+    if [ "$PLATFORM" = "unifios-server" ] && [ "$ADD_HOSTS" = "ask" ]; then
+        info "UniFi OS Server: /etc/hosts não será alterado; configure o nome no DNS dos clientes."
+        return 0
+    fi
 
     if grep -qE "^[[:space:]]*${IP}[[:space:]].*\b${CN}\b" /etc/hosts 2>/dev/null; then
         success "/etc/hosts já possui entrada para $CN"
