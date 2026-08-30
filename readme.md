@@ -1,6 +1,6 @@
 # SCRIPTS-CERT
 
-Versão atual dos scripts: **2.3.5** — 2026-08-14. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
+Versão atual dos scripts: **2.4.0** — 2026-08-30. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
 
 Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos. Todos podem ser usados de forma interativa: execute o comando e responda às perguntas.
 
@@ -8,7 +8,7 @@ Inclui:
 
 - `trust-cert.sh`: importa ou remove certificados SSL/TLS como confiáveis no macOS e Linux.
 - `proxmox-cert.sh`: gera e aplica certificado autoassinado com SAN em Proxmox VE ou Proxmox Backup Server.
-- `unifi-cert.sh`: cria uma CA local, emite certificado para UniFi Network Application e importa no Java Keystore.
+- `unifi-cert.sh`: emite certificados para UniFi Network Application legado e UniFi OS.
 - `ucs-cert.sh`: corrige os SANs e renova o certificado de host pela CA interna do Univention UCS.
 
 ## Suporte
@@ -27,7 +27,8 @@ Inclui:
 
 `unifi-cert.sh`:
 
-- Debian/Ubuntu com UniFi Network Application
+- Debian/Ubuntu com UniFi Network Application legado
+- UniFi OS Server self-hosted no Linux
 
 `ucs-cert.sh`:
 
@@ -60,14 +61,14 @@ O instalador guarda as versões em `~/.local/share/scripts-cert/` e permite list
 
 ```bash
 scripts-cert-installer --list
-scripts-cert-installer --use v2.3.5
+scripts-cert-installer --use v2.4.0
 scripts-cert-installer --rollback
 ```
 
 Para instalar diretamente uma versão publicada:
 
 ```bash
-bash /tmp/scripts-cert-install.sh --version v2.3.5 --yes
+bash /tmp/scripts-cert-install.sh --version v2.4.0 --yes
 ```
 
 > `proxmox-cert`, `unifi-cert` e `ucs-cert` devem ser executados no servidor correspondente. O `trust-cert` pode ser usado no computador que acessa esses servidores.
@@ -88,8 +89,8 @@ Para gerenciar versões:
 
 ```powershell
 scripts-cert-installer -List
-scripts-cert-installer -Version v2.3.5 -Yes
-scripts-cert-installer -Use v2.3.5
+scripts-cert-installer -Version v2.4.0 -Yes
+scripts-cert-installer -Use v2.4.0
 scripts-cert-installer -Rollback
 ```
 
@@ -168,7 +169,8 @@ Escolha o script conforme o equipamento:
 | --- | --- | --- |
 | Confiar em um certificado | Computador cliente Linux ou macOS | `trust-cert` |
 | Criar certificado para Proxmox VE/PBS | Servidor Proxmox | `sudo proxmox-cert` |
-| Criar certificado para UniFi | Servidor UniFi self-hosted | `sudo unifi-cert` |
+| Criar certificado para UniFi Network legado | Servidor UniFi legado | `sudo unifi-cert` |
+| Criar certificado para UniFi OS Server | UniFi OS Server self-hosted | `sudo unifi-cert --platform unifios-server` |
 | Renovar certificado do UCS | UCS Primary Directory Node | `sudo ucs-cert` |
 
 O fluxo recomendado é:
@@ -324,7 +326,7 @@ Export  : /root/proxmox-cert-NOME.pem
 
 ## unifi-cert
 
-Cria uma CA local, emite certificado de servidor com SAN e importa no Java Keystore do UniFi.
+Cria uma CA local e emite certificado de servidor com SAN para o UniFi Network Application legado ou para o UniFi OS Server self-hosted.
 
 Uso interativo no servidor UniFi:
 
@@ -341,12 +343,45 @@ sudo unifi-cert \
   --ip 10.0.1.30
 ```
 
+Para UniFi OS Server self-hosted:
+
+```bash
+sudo unifi-cert \
+  --platform unifios-server \
+  --cn unifi.lab.local \
+  --short unifi \
+  --ip 10.0.1.30
+```
+
+O modo `unifios-server` detecta `uosserver.service`, instala o certificado no volume local, reinicia o serviço, confirma o fingerprint servido e restaura os arquivos anteriores se houver falha. Ele não se destina a CloudKey, UDM ou Cloud Gateway.
+
+> A Ubiquiti documenta oficialmente o serviço `uosserver` e o upload de certificados pelo Control Plane, mas não documenta a substituição direta dos arquivos no volume local. Esse modo automatizado depende da estrutura atual do UniFi OS Server e pode exigir atualização se a Ubiquiti alterar seus diretórios internos.
+
+O caminho padrão do volume é detectado nesta localização:
+
+```text
+/home/uosserver/.local/share/containers/storage/volumes/uosserver_data/_data
+```
+
+Se a instalação usa outro local, informe a raiz `_data`:
+
+```bash
+sudo unifi-cert \
+  --platform unifios-server \
+  --uos-data-dir /outro/caminho/_data \
+  --cn unifi.lab.local \
+  --short unifi \
+  --ip 10.0.1.30
+```
+
 Opções:
 
 ```text
 --cn FQDN              Nome completo do servidor
 --short NOME           Nome curto / alias DNS extra
 --ip IP                IP do servidor
+--platform ALVO        legacy ou unifios-server
+--uos-data-dir CAMINHO Volume de dados do UniFi OS Server
 --keystore CAMINHO     Caminho do keystore UniFi
 --storepass SENHA      Senha do keystore
 --ca-dir CAMINHO       Diretório da CA local
@@ -361,17 +396,28 @@ Opções:
 --version              Exibe a versão
 ```
 
-O que o script faz:
+Comportamento comum aos dois modos:
 
 - Cria uma CA local em `/etc/ssl/unifi-ca/`.
 - Reutiliza a mesma CA nas próximas renovações.
 - Gera certificado do servidor com SAN.
+- Valida a CA, a cadeia, os SANs e a correspondência das chaves.
+
+No modo `legacy`:
+
 - Converte o certificado para PKCS#12.
 - Importa no Java Keystore do UniFi.
 - Faz backup do keystore e da CA.
-- Valida a CA, a cadeia, os SANs e a correspondência das chaves.
 - Cria e valida um keystore temporário antes de substituir o arquivo usado pelo UniFi.
 - Confirma o fingerprint servido na porta 8443 e restaura o keystore/CA anterior em caso de falha.
+
+No modo `unifios-server`:
+
+- Exige uma instalação Linux com `uosserver.service` e usuário `uosserver`.
+- Instala automaticamente `unifi-core.crt` e `unifi-core.key` no volume local.
+- Faz backup dos certificados anteriores e da CA.
+- Reinicia o serviço e procura o novo fingerprint nas portas 443 e 11443.
+- Restaura os arquivos anteriores automaticamente se a inicialização ou a verificação falhar.
 
 Arquivos:
 
@@ -380,6 +426,7 @@ Log      : /var/log/unifi-cert/unifi-cert.log
 Backups  : /var/backups/unifi-cert/
 CA raiz  : /etc/ssl/unifi-ca/ca.crt
 Keystore : /var/lib/unifi/keystore
+UniFi OS : /home/uosserver/.local/share/containers/storage/volumes/uosserver_data/_data/unifi-core/config/
 ```
 
 ## ucs-cert

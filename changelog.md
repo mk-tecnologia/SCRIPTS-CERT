@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.4.0 — 2026-08-30
+
+### unifi-cert.sh
+
+- Adicionado `--platform unifios-server` para instalar automaticamente certificado e chave no UniFi OS Server self-hosted.
+- Adicionado `--uos-data-dir` para instalações cujo volume de dados esteja em outro caminho.
+- O novo modo detecta `uosserver.service`, cria backup, reinicia o serviço, valida o fingerprint servido e executa rollback em caso de falha.
+- Mantido `--platform legacy` como padrão para preservar compatibilidade.
+
 ## v2.3.5 — 2026-08-14
 
 ### Instalador

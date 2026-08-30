@@ -3,7 +3,7 @@
 # unifi-cert.sh — Gerar/aplicar certificado SSL/TLS no UniFi
 # Versão  : consulte APP_VERSION abaixo ou execute --version
 # Autor   : Marcos A. Campos <marcos@mktecnologia.net.br>
-# Suporte : Debian/Ubuntu (UniFi Network Application)
+# Suporte : UniFi Network Application legado e UniFi OS
 # Licença : MIT
 # Dica    : Use Linux :)
 # =============================================================================
@@ -12,8 +12,8 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="unifi-cert"
-APP_VERSION="2.3.5"
-APP_RELEASE_DATE="2026-08-14"
+APP_VERSION="2.4.0"
+APP_RELEASE_DATE="2026-08-30"
 UNIFI_ALIAS="unifi"
 KEYSTORE="/var/lib/unifi/keystore"
 STOREPASS="aircontrolenterprise"
@@ -24,6 +24,14 @@ SERVER_KEY_BITS="2048"
 CA_KEY_BITS="4096"
 LOG_DIR="/var/log/${APP_NAME}"
 BACKUP_DIR="/var/backups/${APP_NAME}"
+PLATFORM="legacy"
+UOS_DATA_DIR="/home/uosserver/.local/share/containers/storage/volumes/uosserver_data/_data"
+UOS_CONFIG_DIR=""
+UOS_CERT_FILE=""
+UOS_KEY_FILE=""
+UOS_CERT_REPLACED="false"
+HAD_UOS_CERT="false"
+HAD_UOS_KEY="false"
 
 # ── Cores ────────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -64,7 +72,7 @@ RUN_COMPLETE="false"
 usage() {
     cat <<EOF_HELP
 ${APP_NAME} v${APP_VERSION}
-Cria uma CA local, emite certificado para o UniFi e importa no Java keystore.
+Cria uma CA local e emite certificado para UniFi Network ou UniFi OS.
 
 Uso:
   ${APP_NAME} [opções]
@@ -73,6 +81,8 @@ Opções:
   --cn FQDN              Nome completo do servidor
   --short NOME           Nome curto / alias DNS extra
   --ip IP                IP do servidor
+  --platform ALVO        legacy ou unifios-server (padrão: legacy)
+  --uos-data-dir CAMINHO Volume de dados do UniFi OS Server
   --keystore CAMINHO     Caminho do keystore UniFi (padrão: ${KEYSTORE})
   --storepass SENHA      Senha do keystore (padrão UniFi)
   --ca-dir CAMINHO       Diretório da CA local (padrão: ${CA_DIR})
@@ -89,6 +99,7 @@ Opções:
 Exemplos:
   ${APP_NAME}
   ${APP_NAME} --cn unifi.lab.local --short unifi --ip 10.0.1.30
+  ${APP_NAME} --platform unifios-server --cn unifi.lab.local --short unifi --ip 10.0.1.30
   ${APP_NAME} --cn unifi.lab.local --ip 10.0.1.30 -y --add-hosts
 EOF_HELP
 }
@@ -120,11 +131,19 @@ cleanup() {
             if [ "${HAD_CA_KEY:-false}" = "true" ]; then cp "$BACKUP_TARGET/ca.key" "$CA_DIR/ca.key" 2>/dev/null || true; else rm -f "$CA_DIR/ca.key"; fi
             if [ "${HAD_CA_SERIAL:-false}" = "true" ]; then cp "$BACKUP_TARGET/ca.srl" "$CA_DIR/ca.srl" 2>/dev/null || true; else rm -f "$CA_DIR/ca.srl"; fi
         fi
+        if [ "${UOS_CERT_REPLACED:-false}" = "true" ] && [ -n "${BACKUP_TARGET:-}" ]; then
+            if [ "${HAD_UOS_CERT:-false}" = "true" ]; then cp "$BACKUP_TARGET/unifi-core.crt" "$UOS_CERT_FILE" 2>/dev/null || true; else rm -f "$UOS_CERT_FILE"; fi
+            if [ "${HAD_UOS_KEY:-false}" = "true" ]; then cp "$BACKUP_TARGET/unifi-core.key" "$UOS_KEY_FILE" 2>/dev/null || true; else rm -f "$UOS_KEY_FILE"; fi
+        fi
     fi
     [ -n "${WORK_DIR:-}" ] && [ -d "$WORK_DIR" ] && rm -rf "$WORK_DIR"
     [ -n "${NEW_KEYSTORE:-}" ] && [ -f "$NEW_KEYSTORE" ] && rm -f "$NEW_KEYSTORE"
     if [ "${SERVICE_STOPPED:-false}" = "true" ]; then
-        systemctl start unifi >/dev/null 2>&1 || true
+        if [ "${PLATFORM:-legacy}" = "unifios-server" ]; then
+            systemctl start uosserver >/dev/null 2>&1 || true
+        else
+            systemctl start unifi >/dev/null 2>&1 || true
+        fi
     fi
     return "$exit_code"
 }
@@ -149,17 +168,19 @@ unifi_service_exists() {
 check_dependencies() {
     step "Verificando dependências"
     require_cmd openssl
-    require_cmd keytool
-    require_cmd systemctl
     require_cmd hostname
     require_cmd awk
     require_cmd grep
     require_cmd sed
     require_cmd cut
     require_cmd tr
-    require_cmd seq
-    require_cmd sleep
-    keytool -help >/dev/null 2>&1 || error "keytool encontrado, mas o runtime Java não está funcional."
+    if [ "$PLATFORM" = "legacy" ] || [ "$PLATFORM" = "unifios-server" ]; then
+        require_cmd keytool
+        require_cmd systemctl
+        require_cmd seq
+        require_cmd sleep
+        keytool -help >/dev/null 2>&1 || error "keytool encontrado, mas o runtime Java não está funcional."
+    fi
     success "Dependências disponíveis"
 }
 
@@ -219,6 +240,8 @@ parse_args() {
             --cn) [ "$#" -ge 2 ] || error "Faltou valor para --cn"; CN="$2"; shift 2 ;;
             --short) [ "$#" -ge 2 ] || error "Faltou valor para --short"; SHORT_NAME="$2"; shift 2 ;;
             --ip) [ "$#" -ge 2 ] || error "Faltou valor para --ip"; IP="$2"; shift 2 ;;
+            --platform) [ "$#" -ge 2 ] || error "Faltou valor para --platform"; PLATFORM="$2"; shift 2 ;;
+            --uos-data-dir) [ "$#" -ge 2 ] || error "Faltou valor para --uos-data-dir"; UOS_DATA_DIR="$2"; shift 2 ;;
             --keystore) [ "$#" -ge 2 ] || error "Faltou valor para --keystore"; KEYSTORE="$2"; shift 2 ;;
             --storepass) [ "$#" -ge 2 ] || error "Faltou valor para --storepass"; STOREPASS="$2"; shift 2 ;;
             --ca-dir) [ "$#" -ge 2 ] || error "Faltou valor para --ca-dir"; CA_DIR="$2"; shift 2 ;;
@@ -234,12 +257,16 @@ parse_args() {
             *) error "Opção desconhecida: $1" ;;
         esac
     done
+    case "$PLATFORM" in
+        legacy|unifios-server) ;;
+        *) error "Plataforma inválida: $PLATFORM (use legacy ou unifios-server)" ;;
+    esac
 }
 
 print_header() {
     echo ""
     printf "%b╔══════════════════════════════════════════════════════╗%b\n" "$BOLD" "$NC"
-    printf "%b║     unifi-cert — UniFi Network Application           ║%b\n" "$BOLD" "$NC"
+    printf "%b║     unifi-cert — UniFi Network / UniFi OS             ║%b\n" "$BOLD" "$NC"
     printf "%b║     Versão: %-10sData: %-10s               ║%b\n" "$BOLD" "v${APP_VERSION}" "$APP_RELEASE_DATE" "$NC"
     printf "%b╚══════════════════════════════════════════════════════╝%b\n" "$BOLD" "$NC"
     echo ""
@@ -247,6 +274,17 @@ print_header() {
 
 check_unifi() {
     step "Verificando UniFi"
+    if [ "$PLATFORM" = "unifios-server" ]; then
+        UOS_CONFIG_DIR="$UOS_DATA_DIR/unifi-core/config"
+        UOS_CERT_FILE="$UOS_CONFIG_DIR/unifi-core.crt"
+        UOS_KEY_FILE="$UOS_CONFIG_DIR/unifi-core.key"
+        [ "$(systemctl show --property=LoadState --value uosserver.service 2>/dev/null || true)" = "loaded" ] \
+            || error "Serviço uosserver não encontrado. Este modo é exclusivo do UniFi OS Server self-hosted."
+        [ -d "$UOS_CONFIG_DIR" ] || error "Diretório do UniFi OS Server não encontrado: $UOS_CONFIG_DIR"
+        id uosserver >/dev/null 2>&1 || error "Usuário uosserver não encontrado."
+        success "UniFi OS Server self-hosted encontrado"
+        return 0
+    fi
     if unifi_service_exists; then
         success "Serviço unifi encontrado"
     else
@@ -279,13 +317,24 @@ collect_config() {
     echo "  CN/FQDN    : $CN"
     echo "  Alias DNS  : $SHORT_NAME"
     echo "  IP         : $IP"
-    echo "  Porta      : 8443"
-    echo "  Keystore   : $KEYSTORE"
+    echo "  Plataforma : $PLATFORM"
+    if [ "$PLATFORM" = "legacy" ]; then
+        echo "  Porta      : 8443"
+        echo "  Keystore   : $KEYSTORE"
+    else
+        echo "  Porta      : 443"
+        echo "  Serviço    : uosserver.service"
+        echo "  Configuração: $UOS_CONFIG_DIR"
+    fi
     echo "  CA raiz    : $CA_FILE"
     echo "  Validade   : $CERT_VALIDITY dias"
     echo "  CA validade: $CA_VALIDITY dias"
     echo ""
-    confirm_or_exit "Confirmar e aplicar?"
+    if [ "$PLATFORM" = "legacy" ]; then
+        confirm_or_exit "Confirmar e aplicar?"
+    else
+        confirm_or_exit "Confirmar e aplicar no UniFi OS Server?"
+    fi
 }
 
 stop_unifi() {
@@ -322,14 +371,35 @@ backup_current() {
     stamp=$(date +%Y%m%d%H%M%S)
     mkdir -p "$BACKUP_DIR"
     BACKUP_TARGET=$(mktemp -d "$BACKUP_DIR/$stamp-XXXXXX")
-    if [ -f "$KEYSTORE" ]; then
+    if [ "$PLATFORM" = "legacy" ] && [ -f "$KEYSTORE" ]; then
         cp "$KEYSTORE" "$BACKUP_TARGET/keystore"
         HAD_KEYSTORE="true"
+    fi
+    if [ "$PLATFORM" = "unifios-server" ]; then
+        if [ -f "$UOS_CERT_FILE" ]; then cp "$UOS_CERT_FILE" "$BACKUP_TARGET/unifi-core.crt"; HAD_UOS_CERT="true"; fi
+        if [ -f "$UOS_KEY_FILE" ]; then cp "$UOS_KEY_FILE" "$BACKUP_TARGET/unifi-core.key"; HAD_UOS_KEY="true"; fi
     fi
     if [ -f "$CA_DIR/ca.crt" ]; then cp "$CA_DIR/ca.crt" "$BACKUP_TARGET/ca.crt"; HAD_CA_CERT="true"; fi
     if [ -f "$CA_DIR/ca.key" ]; then cp "$CA_DIR/ca.key" "$BACKUP_TARGET/ca.key"; HAD_CA_KEY="true"; fi
     if [ -f "$CA_DIR/ca.srl" ]; then cp "$CA_DIR/ca.srl" "$BACKUP_TARGET/ca.srl"; HAD_CA_SERIAL="true"; fi
     success "Backup salvo em: $BACKUP_TARGET"
+}
+
+install_unifios_server_certificate() {
+    local new_cert="" new_key=""
+    step "Instalando no UniFi OS Server"
+    new_cert=$(mktemp "$UOS_CONFIG_DIR/unifi-core.crt.new.XXXXXX")
+    new_key=$(mktemp "$UOS_CONFIG_DIR/unifi-core.key.new.XXXXXX")
+    run_cmd sh -c 'cat "$1" "$2" > "$3"' sh "$WORK_DIR/server.crt" "$CA_DIR/ca.crt" "$new_cert"
+    run_cmd cp "$WORK_DIR/server.key" "$new_key"
+    run_cmd chown root:uosserver "$new_cert" "$new_key"
+    run_cmd chmod 640 "$new_cert" "$new_key"
+    openssl x509 -in "$new_cert" -noout >/dev/null || error "Certificado combinado inválido."
+    openssl pkey -in "$new_key" -noout >/dev/null || error "Chave preparada inválida."
+    run_cmd mv "$new_cert" "$UOS_CERT_FILE"
+    run_cmd mv "$new_key" "$UOS_KEY_FILE"
+    UOS_CERT_REPLACED="true"
+    success "Certificado instalado no volume do UniFi OS Server"
 }
 
 validate_ca() {
@@ -557,6 +627,60 @@ activate_and_verify_unifi() {
     fi
 }
 
+stop_unifios_server() {
+    step "Parando UniFi OS Server"
+    run_cmd systemctl stop uosserver || error "Não foi possível parar uosserver.service."
+    SERVICE_STOPPED="true"
+    success "UniFi OS Server parado"
+}
+
+restore_unifios_server_certificate() {
+    warn "Restaurando o certificado anterior do UniFi OS Server."
+    if [ "$HAD_UOS_CERT" = "true" ]; then cp "$BACKUP_TARGET/unifi-core.crt" "$UOS_CERT_FILE"; else rm -f "$UOS_CERT_FILE"; fi
+    if [ "$HAD_UOS_KEY" = "true" ]; then cp "$BACKUP_TARGET/unifi-core.key" "$UOS_KEY_FILE"; else rm -f "$UOS_KEY_FILE"; fi
+    UOS_CERT_REPLACED="false"
+}
+
+verify_live_unifios_server() {
+    local expected="" served="" attempt="" port=""
+    step "Verificando certificado servido pelo UniFi OS Server"
+    expected=$(openssl x509 -in "$WORK_DIR/server.crt" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':')
+    for attempt in $(seq 1 30); do
+        if systemctl is-active --quiet uosserver; then
+            for port in 443 11443; do
+                served=$(openssl s_client -connect "$IP:$port" -servername "$CN" </dev/null 2>/dev/null \
+                    | openssl x509 -noout -fingerprint -sha256 2>/dev/null \
+                    | cut -d= -f2 | tr -d ':') || true
+                if [ -n "$served" ] && [ "$served" = "$expected" ]; then
+                    success "Fingerprint SHA-256 confirmado em $IP:$port: $served"
+                    return 0
+                fi
+            done
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+activate_and_verify_unifios_server() {
+    step "Iniciando UniFi OS Server"
+    if ! run_cmd systemctl start uosserver; then
+        restore_unifios_server_certificate
+        systemctl start uosserver >/dev/null 2>&1 || true
+        SERVICE_STOPPED="false"
+        error "O UniFi OS Server não iniciou; o certificado anterior foi restaurado."
+    fi
+    SERVICE_STOPPED="false"
+    if ! verify_live_unifios_server; then
+        systemctl stop uosserver >/dev/null 2>&1 || true
+        SERVICE_STOPPED="true"
+        restore_unifios_server_certificate
+        systemctl start uosserver >/dev/null 2>&1 || true
+        SERVICE_STOPPED="false"
+        error "O novo certificado não foi servido; o anterior foi restaurado."
+    fi
+}
+
 update_hosts() {
     step "Verificando /etc/hosts"
     local line="${IP}  ${CN}  ${SHORT_NAME}"
@@ -615,6 +739,23 @@ final_instructions() {
     echo ""
 }
 
+final_instructions_unifios() {
+    echo ""
+    printf "%b╔══════════════════════════════════════════════════════╗%b\n" "$BOLD" "$NC"
+    printf "%b║     ✅ Certificado aplicado no UniFi OS Server!       ║%b\n" "$BOLD" "$NC"
+    printf "%b╚══════════════════════════════════════════════════════╝%b\n" "$BOLD" "$NC"
+    echo ""
+    echo "  CN       : $CN"
+    echo "  SANs     : DNS:$CN, DNS:$SHORT_NAME, IP:$IP"
+    echo "  CA raiz  : $CA_DIR/ca.crt"
+    echo "  Certificado: $UOS_CERT_FILE"
+    echo "  Chave    : $UOS_KEY_FILE"
+    echo "  Backup   : $BACKUP_TARGET"
+    echo ""
+    echo "Acesse https://$CN e, nos clientes, confie na CA local: $CA_DIR/ca.crt"
+    echo ""
+}
+
 main() {
     parse_args "$@"
     print_header
@@ -622,17 +763,23 @@ main() {
     check_dependencies
     check_unifi
     collect_config
-    stop_unifi
     backup_current
     create_or_reuse_ca
     create_server_certificate
     verify_server_certificate
-    import_keystore
-    activate_and_verify_unifi
+    if [ "$PLATFORM" = "legacy" ]; then
+        stop_unifi
+        import_keystore
+        activate_and_verify_unifi
+    else
+        stop_unifios_server
+        install_unifios_server_certificate
+        activate_and_verify_unifios_server
+    fi
     update_hosts
-    log_msg "APPLIED cn=$CN short=$SHORT_NAME ip=$IP days=$CERT_VALIDITY ca=$CA_DIR/ca.crt keystore=$KEYSTORE"
+    log_msg "COMPLETED platform=$PLATFORM cn=$CN short=$SHORT_NAME ip=$IP days=$CERT_VALIDITY ca=$CA_DIR/ca.crt"
     RUN_COMPLETE="true"
-    final_instructions
+    if [ "$PLATFORM" = "legacy" ]; then final_instructions; else final_instructions_unifios; fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
