@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.5.4 — 2026-09-07
+
+- Leitura e atualização de SAN no UCS feitas em Bash, sem depender de awk.
+- Testes para `[ v3_req ]`, arquivos CRLF e execução da atualização com awk indisponível.
+- Apenas v2.5.4 oferecida como versão suportada; inclui instalador Bash 1.6.1.
+
 ## Instalador Bash 1.6.1 — 2026-09-07
 
 - Substituída a validação da lista de versões via awk por Bash, eliminando essa dependência na seleção.

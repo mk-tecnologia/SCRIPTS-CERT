@@ -1,2 +1,2 @@
 # Versões suportadas, em ordem de preferência. Tags históricas ficam fora do menu.
-v2.5.3
+v2.5.4

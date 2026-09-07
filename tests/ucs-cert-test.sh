@@ -54,14 +54,25 @@ printf '%s\n' "$SAN_OUTPUT" | grep -Fq "DNS:$SHORT_NAME"
 printf '%s\n' "$SAN_OUTPUT" | grep -Fq "IP Address:$IP"
 
 # Missing SAN, commented section header, and section at EOF must produce a usable CSR.
-for variant in missing commented eof; do
+for variant in missing commented eof spaced crlf; do
     awk -v variant="$variant" '
         /^subjectAltName = DNS:old/ { next }
         /^\[v3_req\]/ && variant == "commented" { print " [ v3_req ] # request extensions"; next }
         /^\[server_cert\]/ && variant == "eof" { exit }
         { print }
     ' "$REPO_DIR/tests/fixtures/ucs-openssl.cnf" > "$OPENSSL_CONFIG"
+    if [ "$variant" = spaced ] || [ "$variant" = crlf ]; then
+        sed 's/\[v3_req\]/[ v3_req ]/' "$REPO_DIR/tests/fixtures/ucs-openssl.cnf" > "$OPENSSL_CONFIG"
+    fi
+    if [ "$variant" = crlf ]; then
+        while IFS= read -r line; do printf '%s\r\n' "$line"; done \
+            < "$OPENSSL_CONFIG" > "$TEST_ROOT/crlf.cnf"
+        cp "$TEST_ROOT/crlf.cnf" "$OPENSSL_CONFIG"
+    fi
+    # Parsing and rewriting SAN must work even when awk is unavailable.
+    awk() { return 99; }
     update_san_config
+    unset -f awk
     cp "$OPENSSL_CONFIG" "$TEST_ROOT/updated.cnf"
     update_san_config
     cmp "$TEST_ROOT/updated.cnf" "$OPENSSL_CONFIG"

@@ -12,7 +12,7 @@ set -euo pipefail
 
 # ── Metadados ────────────────────────────────────────────────────────────────
 APP_NAME="proxmox-cert"
-APP_VERSION="2.5.3"
+APP_VERSION="2.5.4"
 APP_RELEASE_DATE="2026-09-07"
 CERT_VALIDITY="825"
 KEY_BITS="4096"

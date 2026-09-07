@@ -1,6 +1,6 @@
 # SCRIPTS-CERT
 
-Versão atual dos scripts: **2.5.3** — 2026-09-07. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
+Versão atual dos scripts: **2.5.4** — 2026-09-07. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
 
 Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos. Todos podem ser usados de forma interativa: execute o comando e responda às perguntas.
 
@@ -61,7 +61,7 @@ O instalador guarda as versões em `~/.local/share/scripts-cert/` e permite list
 
 ```bash
 scripts-cert-installer --list
-scripts-cert-installer --use v2.5.3
+scripts-cert-installer --use v2.5.4
 scripts-cert-installer --rollback
 scripts-cert-installer --prune
 ```
@@ -69,7 +69,7 @@ scripts-cert-installer --prune
 Para instalar diretamente uma versão publicada:
 
 ```bash
-bash /tmp/scripts-cert-install.sh --version v2.5.3 --yes
+bash /tmp/scripts-cert-install.sh --version v2.5.4 --yes
 ```
 
 > `proxmox-cert`, `unifi-cert` e `ucs-cert` devem ser executados no servidor correspondente. O `trust-cert` pode ser usado no computador que acessa esses servidores.
@@ -90,8 +90,8 @@ Para gerenciar versões:
 
 ```powershell
 scripts-cert-installer -List
-scripts-cert-installer -Version v2.5.3 -Yes
-scripts-cert-installer -Use v2.5.3
+scripts-cert-installer -Version v2.5.4 -Yes
+scripts-cert-installer -Use v2.5.4
 scripts-cert-installer -Rollback
 scripts-cert-installer -Prune
 ```
@@ -120,7 +120,7 @@ Certificados já aplicados, CAs, backups e logs também são preservados para ev
 trust-cert --remove --host SERVIDOR --port PORTA
 ```
 
-O instalador mostra somente as versões suportadas listadas em `supported-versions.txt` na branch `main`, em ordem de preferência. Atualmente apenas `v2.5.3` é oferecida; tags anteriores permanecem como histórico. A cada release, atualize essa lista para retirar versões substituídas ou com erros conhecidos. Falhas ao consultar a lista interrompem a instalação. Desenvolvimento e versões históricas exigem `--version REF` (PowerShell: `-Version REF`) explícito. Depois de instalar, trocar ou restaurar uma versão, ele remove automaticamente versões locais que não sejam a ativa ou a anterior. Assim permanece disponível um rollback sem acumular cópias antigas. A limpeza também pode ser executada manualmente com `scripts-cert-installer --prune`.
+O instalador mostra somente as versões suportadas listadas em `supported-versions.txt` na branch `main`, em ordem de preferência. Atualmente apenas `v2.5.4` é oferecida; tags anteriores permanecem como histórico. A cada release, atualize essa lista para retirar versões substituídas ou com erros conhecidos. Falhas ao consultar a lista interrompem a instalação. Desenvolvimento e versões históricas exigem `--version REF` (PowerShell: `-Version REF`) explícito. Depois de instalar, trocar ou restaurar uma versão, ele remove automaticamente versões locais que não sejam a ativa ou a anterior. Assim permanece disponível um rollback sem acumular cópias antigas. A limpeza também pode ser executada manualmente com `scripts-cert-installer --prune`.
 
 No Windows PowerShell:
 

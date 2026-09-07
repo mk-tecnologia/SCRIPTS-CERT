@@ -10,7 +10,7 @@
 set -euo pipefail
 
 APP_NAME="ucs-cert"
-APP_VERSION="2.5.3"
+APP_VERSION="2.5.4"
 APP_RELEASE_DATE="2026-09-07"
 DEFAULT_PORT="443"
 DEFAULT_MAX_DAYS="3650"
@@ -280,15 +280,23 @@ backup_current() {
 }
 
 update_san_config() {
-    local config_counts="" section_count="" san_count="" generated_config=""
+    local section_count=0 san_count=0 generated_config="" line="" parsed="" in_section=false
+    local section_pattern='^[[:space:]]*\[[[:space:]]*v3_req[[:space:]]*\][[:space:]]*(#.*)?$'
+    local any_section_pattern='^[[:space:]]*\['
+    local san_pattern='^[[:space:]]*subjectAltName[[:space:]]*='
+    local san="subjectAltName = DNS:${CN}, DNS:${SHORT_NAME}, IP:${IP}"
     step "Atualizando SAN no openssl.cnf"
-    config_counts=$(awk '
-        /^[[:space:]]*\[[[:space:]]*v3_req[[:space:]]*\][[:space:]]*(#.*)?$/ { in_v3_req = 1; sections++; next }
-        /^[[:space:]]*\[/ { in_v3_req = 0 }
-        in_v3_req && /^[[:space:]]*subjectAltName[[:space:]]*=/ { count++ }
-        END { print sections + 0, count + 0 }
-    ' "$OPENSSL_CONFIG")
-    read -r section_count san_count <<< "$config_counts"
+    while IFS= read -r line || [ -n "$line" ]; do
+        parsed="${line%$'\r'}"
+        if [[ "$parsed" =~ $section_pattern ]]; then
+            in_section=true
+            section_count=$((section_count + 1))
+        elif [[ "$parsed" =~ $any_section_pattern ]]; then
+            in_section=false
+        elif [ "$in_section" = true ] && [[ "$parsed" =~ $san_pattern ]]; then
+            san_count=$((san_count + 1))
+        fi
+    done < "$OPENSSL_CONFIG"
     [ "$section_count" -eq 1 ] \
         || error "Esperava exatamente uma seção [v3_req] em $OPENSSL_CONFIG; encontrei $section_count. Nenhum arquivo foi alterado."
     [ "$san_count" -le 1 ] \
@@ -297,17 +305,22 @@ update_san_config() {
     [ -n "${WORK_DIR:-}" ] && [ -d "$WORK_DIR" ] && rm -rf "$WORK_DIR"
     WORK_DIR=$(mktemp -d "/tmp/${APP_NAME}_XXXXXX")
     generated_config="$WORK_DIR/openssl.cnf"
-    awk -v san="subjectAltName = DNS:${CN}, DNS:${SHORT_NAME}, IP:${IP}" -v san_count="$san_count" '
-        /^[[:space:]]*\[[[:space:]]*v3_req[[:space:]]*\][[:space:]]*(#.*)?$/ {
-            in_v3_req = 1
-            print
-            if (san_count == 0) print san
-            next
-        }
-        /^[[:space:]]*\[/ { in_v3_req = 0 }
-        in_v3_req && /^[[:space:]]*subjectAltName[[:space:]]*=/ { print san; next }
-        { print }
-    ' "$OPENSSL_CONFIG" > "$generated_config"
+    in_section=false
+    while IFS= read -r line || [ -n "$line" ]; do
+        parsed="${line%$'\r'}"
+        if [[ "$parsed" =~ $section_pattern ]]; then
+            in_section=true
+            printf '%s\n' "$line"
+            if [ "$san_count" -eq 0 ]; then printf '%s\n' "$san"; fi
+            continue
+        elif [[ "$parsed" =~ $any_section_pattern ]]; then
+            in_section=false
+        elif [ "$in_section" = true ] && [[ "$parsed" =~ $san_pattern ]]; then
+            printf '%s\n' "$san"
+            continue
+        fi
+        printf '%s\n' "$line"
+    done < "$OPENSSL_CONFIG" > "$generated_config"
 
     FILES_MODIFIED="true"
     run_cmd cp "$generated_config" "$OPENSSL_CONFIG"
