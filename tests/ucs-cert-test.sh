@@ -103,6 +103,93 @@ subjectAltName = DNS:duplicate.example.test
     cmp "$TEST_ROOT/invalid.cnf" "$OPENSSL_CONFIG"
 done
 
+# Primary and Backup roles, discovery, and refusal of non-authoritative issuers.
+ucr() {
+    case "$2" in
+        server/role) printf '%s\n' "$TEST_ROLE" ;;
+        ldap/master) echo primary.example.test ;;
+    esac
+}
+for TEST_ROLE in domaincontroller_master primary_directory_node domaincontroller_backup backup_directory_node; do
+    PRIMARY=""
+    check_ucs_role
+    if [[ "$TEST_ROLE" == *backup* ]]; then
+        [ "$PRIMARY" = primary.example.test ]
+    fi
+done
+for TEST_ROLE in memberserver domaincontroller_slave unknown; do
+    if (trap - EXIT; check_ucs_role) > "$TEST_ROOT/error.log" 2>&1; then
+        error "Papel indevido aceito: $TEST_ROLE"
+    fi
+done
+TEST_ROLE=domaincontroller_backup
+if (trap - EXIT; ISSUE_ONLY=true; check_ucs_role) > "$TEST_ROOT/error.log" 2>&1; then
+    error "Backup aceito como emissor"
+fi
+unset -f ucr
+
+# Exercise transport and local installation with real certificate/key material.
+PRIMARY=primary.example.test
+SCRIPT_FILE="$REPO_DIR/ucs-cert.sh"
+FILES_MODIFIED=false
+cp "$TEST_ROOT/expected/"* "$CERT_DIR/"
+ssh() {
+    printf '%s\n' "$*" > "$TEST_ROOT/ssh-args"
+    cat > "$TEST_ROOT/remote-script"
+    return "${SSH_RESULT:-0}"
+}
+scp() {
+    local source_file="${3##*/}"
+    cp "$TEST_ROOT/expected/$source_file" "$4"
+}
+renew_on_primary
+cmp "$SCRIPT_FILE" "$TEST_ROOT/remote-script"
+grep -Fq -- '--issue-only' "$TEST_ROOT/ssh-args"
+grep -Fq -- "--cn $CN" "$TEST_ROOT/ssh-args"
+cmp "$TEST_ROOT/expected/private.key" "$KEY_FILE"
+rm -rf "$WORK_DIR"
+WORK_DIR=""
+FILES_MODIFIED=false
+SSH_RESULT=1
+if (trap - EXIT; renew_on_primary) > "$TEST_ROOT/error.log" 2>&1; then
+    error "Falha SSH ignorada"
+fi
+SSH_RESULT=0
+scp() { return 1; }
+if (trap - EXIT; renew_on_primary) > "$TEST_ROOT/error.log" 2>&1; then
+    error "Falha de download ignorada"
+fi
+for file in openssl.cnf req.pem cert.pem private.key; do
+    cmp "$TEST_ROOT/expected/$file" "$CERT_DIR/$file"
+done
+# Mismatched downloaded certificate must be rejected before copying any file.
+openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=other.example.test \
+    -keyout "$TEST_ROOT/other.key" -out "$TEST_ROOT/other.pem" -days 1 >/dev/null 2>&1
+scp() {
+    local source_file="${3##*/}"
+    if [ "$source_file" = cert.pem ]; then
+        cp "$TEST_ROOT/other.pem" "$4"
+    else
+        cp "$TEST_ROOT/expected/$source_file" "$4"
+    fi
+}
+if (trap - EXIT; renew_on_primary) > "$TEST_ROOT/error.log" 2>&1; then
+    error "Certificado com chave diferente aceito"
+fi
+grep -Fq 'difere da chave local' "$TEST_ROOT/error.log"
+for file in openssl.cnf req.pem cert.pem private.key; do
+    cmp "$TEST_ROOT/expected/$file" "$CERT_DIR/$file"
+done
+unset -f ssh scp
+# Remote rollback must not reload the Primary Apache.
+systemctl() { echo called > "$TEST_ROOT/reloaded"; }
+ISSUE_ONLY=true
+FILES_MODIFIED=true
+restore_backup
+[ ! -e "$TEST_ROOT/reloaded" ]
+unset -f systemctl
+ISSUE_ONLY=false
+
 RUN_COMPLETE="true"
 FILES_MODIFIED="false"
-success "Teste UCS: configuração SAN e CSR validados"
+success "Teste UCS: SAN, CSR, papéis e transporte do Backup validados"

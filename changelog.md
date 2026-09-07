@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.5.5 — 2026-09-07
+
+- Suporte a Backup Directory Node: emissão no Primary via SSH e aplicação local, preservando a chave privada.
+- Descoberta do Primary via `ldap/master`, com opção `--primary`.
+- Emissão remota sem recarregar Apache do Primary; rejeição de aplicação em host diferente do CN.
+
 ## v2.5.4 — 2026-09-07
 
 - Leitura e atualização de SAN no UCS feitas em Bash, sem depender de awk.

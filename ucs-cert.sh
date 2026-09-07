@@ -3,14 +3,14 @@
 # ucs-cert.sh — Corrigir/renovar certificado TLS de host no Univention UCS
 # Versão  : consulte APP_VERSION abaixo ou execute --version
 # Autor   : Marcos A. Campos <marcos@mktecnologia.net.br>
-# Suporte : Univention Corporate Server — Primary Directory Node/DC Master
+# Suporte : Univention Corporate Server — Primary e Backup Directory Nodes
 # Licença : MIT
 # =============================================================================
 
 set -euo pipefail
 
 APP_NAME="ucs-cert"
-APP_VERSION="2.5.4"
+APP_VERSION="2.5.5"
 APP_RELEASE_DATE="2026-09-07"
 DEFAULT_PORT="443"
 DEFAULT_MAX_DAYS="3650"
@@ -46,6 +46,10 @@ BACKUP_TARGET=""
 WORK_DIR=""
 FILES_MODIFIED="false"
 RUN_COMPLETE="false"
+UCS_ROLE=""
+PRIMARY=""
+ISSUE_ONLY="false"
+SCRIPT_FILE="${BASH_SOURCE[0]:-}"
 
 usage() {
     cat <<EOF
@@ -59,6 +63,8 @@ Opções:
   --cn FQDN          FQDN do host UCS (padrão: hostname -f)
   --short NOME       Nome curto no SAN (padrão: hostname -s)
   --ip IP            IPv4 que deve constar no SAN
+  --primary FQDN     Primary para emissão via SSH no Backup (padrão: ldap/master)
+  --issue-only       Emite no Primary sem recarregar serviços (uso remoto)
   --port PORTA       Porta HTTPS verificada (padrão: 443)
   --days DIAS        Validade; padrão obtido de ssl/default/days
   -y, --yes          Executa sem confirmação
@@ -94,7 +100,9 @@ restore_backup() {
     cp -a "$BACKUP_TARGET/openssl.cnf" "$OPENSSL_CONFIG" 2>/dev/null || true
     cp -a "$BACKUP_TARGET/req.pem" "$REQUEST_FILE" 2>/dev/null || true
     cp -a "$BACKUP_TARGET/cert.pem" "$CERT_FILE" 2>/dev/null || true
-    systemctl reload apache2 >/dev/null 2>&1 || true
+    if [ "$ISSUE_ONLY" != "true" ]; then
+        systemctl reload apache2 >/dev/null 2>&1 || true
+    fi
     FILES_MODIFIED="false"
 }
 
@@ -177,6 +185,8 @@ confirm_or_exit() {
 parse_args() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
+            --primary) [ "$#" -ge 2 ] || error "Faltou valor para --primary"; PRIMARY="$2"; shift 2 ;;
+            --issue-only) ISSUE_ONLY="true"; shift ;;
             --cn) [ "$#" -ge 2 ] || error "Faltou valor para --cn"; CN="$2"; shift 2 ;;
             --short) [ "$#" -ge 2 ] || error "Faltou valor para --short"; SHORT_NAME="$2"; shift 2 ;;
             --ip) [ "$#" -ge 2 ] || error "Faltou valor para --ip"; IP="$2"; shift 2 ;;
@@ -203,12 +213,21 @@ print_header() {
 check_ucs_role() {
     local role=""
     role=$(ucr get server/role)
+    UCS_ROLE="$role"
     case "$role" in
         domaincontroller_master|primary_directory_node)
             success "Papel UCS compatível: $role"
             ;;
+        domaincontroller_backup|backup_directory_node)
+            [ "$ISSUE_ONLY" != "true" ] || error "A emissão deve ocorrer no Primary."
+            require_cmd ssh
+            require_cmd scp
+            PRIMARY="${PRIMARY:-$(ucr get ldap/master)}"
+            validate_hostname "$PRIMARY"
+            success "Backup UCS: emissão no Primary $PRIMARY via SSH como root"
+            ;;
         *)
-            error "Este procedimento deve rodar no Primary Directory Node/DC Master. Papel atual: ${role:-desconhecido}"
+            error "Este procedimento deve rodar no Primary ou Backup Directory Node. Papel atual: ${role:-desconhecido}"
             ;;
     esac
 }
@@ -232,6 +251,9 @@ collect_config() {
     validate_number "$PORT" "Porta" "65535"
     validate_number "$CERT_VALIDITY" "Validade" "$DEFAULT_MAX_DAYS"
 
+    if [ "$ISSUE_ONLY" != "true" ]; then
+        [ "$CN" = "$default_cn" ] || error "Execute no host $CN; este servidor é $default_cn."
+    fi
     CERT_DIR="/etc/univention/ssl/$CN"
     OPENSSL_CONFIG="$CERT_DIR/openssl.cnf"
     CERT_FILE="$CERT_DIR/cert.pem"
@@ -252,6 +274,9 @@ collect_config() {
     echo "  Diretório : $CERT_DIR"
     echo "  Novo SAN  : DNS:$CN, DNS:$SHORT_NAME, IP:$IP"
     echo ""
+    if [ -n "$PRIMARY" ]; then
+        echo "  Emissão   : root@$PRIMARY (SSH); aplicação neste Backup"
+    fi
     confirm_or_exit "Confirmar backup, renovação e aplicação?"
 }
 
@@ -365,6 +390,30 @@ verify_new_certificate() {
     success "Certificado, SANs e chave validados"
 }
 
+renew_on_primary() {
+    local remote_command="" file="" downloaded_pubkey="" local_pubkey=""
+    step "Renovando o certificado de $CN no Primary $PRIMARY"
+    # Quote each argument for the remote shell; never disable SSH host verification.
+    printf -v remote_command '%q ' bash -s -- --issue-only --yes \
+        --cn "$CN" --short "$SHORT_NAME" --ip "$IP" --days "$CERT_VALIDITY"
+    ssh -o ConnectTimeout=15 "root@$PRIMARY" "$remote_command" < "$SCRIPT_FILE" \
+        || error "Falha na emissão no Primary; arquivos locais preservados."
+    warn "Emissão concluída no Primary. Se a aplicação local falhar, a renovação permanece no Primary; execute novamente para reaplicar."
+    WORK_DIR=$(mktemp -d "/tmp/${APP_NAME}_XXXXXX")
+    for file in openssl.cnf req.pem cert.pem; do
+        scp -o ConnectTimeout=15 "root@$PRIMARY:/etc/univention/ssl/$CN/$file" "$WORK_DIR/$file" \
+            || error "Falha ao obter $file do Primary; arquivos locais preservados."
+    done
+    downloaded_pubkey=$(openssl x509 -in "$WORK_DIR/cert.pem" -pubkey -noout | openssl sha256)
+    local_pubkey=$(openssl pkey -in "$KEY_FILE" -pubout | openssl sha256)
+    [ "$downloaded_pubkey" = "$local_pubkey" ] \
+        || error "A chave do certificado no Primary difere da chave local; verifique a sincronização UCS."
+    FILES_MODIFIED="true"
+    for file in openssl.cnf req.pem cert.pem; do
+        run_cmd cp "$WORK_DIR/$file" "$CERT_DIR/$file"
+    done
+}
+
 activate_and_verify() {
     local expected="" served="" attempt=""
     step "Recarregando Apache e verificando a porta $PORT"
@@ -398,6 +447,9 @@ final_summary() {
     echo "  Backup     : $BACKUP_TARGET"
     echo "  Log        : $LOG_DIR/${APP_NAME}.log"
     echo ""
+    if [ "$ISSUE_ONLY" = "true" ]; then
+        echo "Emissão concluída no Primary; aplicação no host de destino pendente."
+    fi
     echo "No Mac, confie preferencialmente na CA raiz do domínio UCS:"
     echo "  /etc/univention/ssl/ucsCA/CAcert.pem"
 }
@@ -411,17 +463,20 @@ main() {
     collect_config
     validate_existing_material
     backup_current
-    update_san_config
-    rebuild_request
-    renew_certificate
+    case "$UCS_ROLE" in
+        domaincontroller_backup|backup_directory_node) renew_on_primary ;;
+        *) update_san_config; rebuild_request; renew_certificate ;;
+    esac
     verify_new_certificate
-    activate_and_verify
+    if [ "$ISSUE_ONLY" != "true" ]; then
+        activate_and_verify
+    fi
     log_msg "RENEWED cn=$CN short=$SHORT_NAME ip=$IP port=$PORT days=$CERT_VALIDITY backup=$BACKUP_TARGET"
     RUN_COMPLETE="true"
     FILES_MODIFIED="false"
     final_summary
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+if [[ "${BASH_SOURCE[0]:-}" == "$0" || -z "${BASH_SOURCE[0]:-}" ]]; then
     main "$@"
 fi
