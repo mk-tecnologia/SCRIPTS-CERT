@@ -1,5 +1,11 @@
 # Changelog
 
+## Instalador Bash 1.6.1 — 2026-09-07
+
+- Substituída a validação da lista de versões via awk por Bash, eliminando essa dependência na seleção.
+- Erros de download e conteúdo inválido agora têm diagnóstico específico.
+- Mantida v2.5.3 como versão suportada dos scripts.
+
 ## v2.5.3 — 2026-09-07
 
 ### Instalador

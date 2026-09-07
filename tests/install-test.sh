@@ -7,7 +7,11 @@ curl() {
     [ "${FETCH_FAIL:-false}" = false ] || return 22
     printf '%s\n' "$MANIFEST"
 }
-MANIFEST=$'# supported\nv2.5.3\r\nv2.5.3\n'
+# Version selection must not depend on the system awk implementation.
+awk() { return 99; }
+MANIFEST=$'# Versões suportadas; tags históricas\nv2.5.3\r\nv2.5.3\n'
+[ "$(supported_versions)" = v2.5.3 ]
+MANIFEST=$(cat "$REPO_DIR/supported-versions.txt")
 [ "$(supported_versions)" = v2.5.3 ]
 ASSUME_YES=true
 select_remote_version

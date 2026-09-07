@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-INSTALLER_VERSION="1.6.0"
+INSTALLER_VERSION="1.6.1"
 DEFAULT_REPO="mk-tecnologia/SCRIPTS-CERT"
 REPO="$DEFAULT_REPO"
 GITHUB_RAW_BASE="${SCRIPTS_CERT_RAW_BASE:-https://raw.githubusercontent.com}"
@@ -108,16 +108,26 @@ parse_args() {
 }
 
 supported_versions() {
-    local manifest=""
-    require_cmd awk
+    local manifest="" entry="" versions="" seen=$'\n'
     manifest=$(curl -fsSL --connect-timeout 10 --max-time 30 \
-        "${GITHUB_RAW_BASE}/${REPO}/main/supported-versions.txt") || return 1
-    printf '%s\n' "$manifest" | awk '
-        { sub(/\r$/, "") }
-        /^v[0-9]+\.[0-9]+\.[0-9]+$/ { if (!seen[$0]++) print; next }
-        /^[[:space:]]*(#.*)?$/ { next }
-        { exit 1 }
-    '
+        "${GITHUB_RAW_BASE}/${REPO}/main/supported-versions.txt") || {
+        printf '%s\n' 'Falha ao baixar a lista de versões suportadas.' >&2
+        return 1
+    }
+    while IFS= read -r entry || [ -n "$entry" ]; do
+        entry="${entry%$'\r'}"
+        if [[ "$entry" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            case "$seen" in
+                *$'\n'"$entry"$'\n'*) continue ;;
+            esac
+            seen+="$entry"$'\n'
+            versions+="$entry"$'\n'
+        elif [[ ! "$entry" =~ ^[[:space:]]*(#.*)?$ ]]; then
+            printf 'Linha inválida na lista de versões suportadas: %s\n' "$entry" >&2
+            return 1
+        fi
+    done <<< "$manifest"
+    printf '%s' "$versions"
 }
 
 local_versions() {
