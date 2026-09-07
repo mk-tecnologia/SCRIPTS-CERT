@@ -6,11 +6,9 @@
 
 set -euo pipefail
 
-INSTALLER_VERSION="1.5.0"
-MAX_REMOTE_VERSIONS="5"
+INSTALLER_VERSION="1.6.0"
 DEFAULT_REPO="mk-tecnologia/SCRIPTS-CERT"
 REPO="$DEFAULT_REPO"
-GITHUB_API_BASE="${SCRIPTS_CERT_API_BASE:-https://api.github.com}"
 GITHUB_RAW_BASE="${SCRIPTS_CERT_RAW_BASE:-https://raw.githubusercontent.com}"
 REQUESTED_VERSION=""
 ACTION="install"
@@ -53,7 +51,7 @@ Uso:
 
 Opções:
   --version REF          Instala uma tag/branch/commit específica (ex.: v2.3.5)
-  --list                 Lista versões publicadas no GitHub e versões locais
+  --list                 Lista versões suportadas no GitHub e versões locais
   --rollback             Volta para a versão anteriormente ativa
   --use VERSÃO           Ativa uma versão já instalada, sem baixar novamente
   --prune                Remove versões locais fora de ativa/anterior
@@ -63,8 +61,8 @@ Opções:
   -h, --help             Exibe esta ajuda
   --installer-version    Exibe a versão do instalador
 
-Sem --version, o instalador oferece as tags disponíveis. Se não houver tags,
-usa a branch main. Apenas as ${MAX_REMOTE_VERSIONS} tags mais recentes são exibidas.
+Sem --version, o instalador oferece somente as versões suportadas.
+Para desenvolvimento, use --version main explicitamente.
 Localmente são preservadas somente a versão ativa e a anterior para rollback:
   ${VERSIONS_DIR}/
 EOF
@@ -109,12 +107,17 @@ parse_args() {
     printf '%s' "$REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || die "Repositório inválido: $REPO"
 }
 
-github_tags() {
-    curl -fsSL --connect-timeout 10 --max-time 30 \
-        -H 'Accept: application/vnd.github+json' \
-        "${GITHUB_API_BASE}/repos/${REPO}/tags?per_page=100" 2>/dev/null \
-        | sed -n 's/^[[:space:]]*"name":[[:space:]]*"\([^"]*\)".*/\1/p' \
-        | sed -n "1,${MAX_REMOTE_VERSIONS}p"
+supported_versions() {
+    local manifest=""
+    require_cmd awk
+    manifest=$(curl -fsSL --connect-timeout 10 --max-time 30 \
+        "${GITHUB_RAW_BASE}/${REPO}/main/supported-versions.txt") || return 1
+    printf '%s\n' "$manifest" | awk '
+        { sub(/\r$/, "") }
+        /^v[0-9]+\.[0-9]+\.[0-9]+$/ { if (!seen[$0]++) print; next }
+        /^[[:space:]]*(#.*)?$/ { next }
+        { exit 1 }
+    '
 }
 
 local_versions() {
@@ -164,9 +167,9 @@ list_versions() {
     current=$(link_version_name "$CURRENT_LINK")
     previous=$(link_version_name "$PREVIOUS_LINK")
 
-    echo "Versões publicadas em github.com/${REPO}:"
-    tags=$(github_tags || true)
-    if [ -n "$tags" ]; then printf '  %s\n' $tags; else echo "  (nenhuma tag; main está disponível)"; fi
+    echo "Versões suportadas em github.com/${REPO}:"
+    tags=$(supported_versions) || die "Não foi possível consultar as versões suportadas. Tente novamente."
+    if [ -n "$tags" ]; then printf '  %s\n' $tags; else echo "  (nenhuma versão suportada)"; fi
     echo ""
     echo "Versões instaladas localmente:"
     if [ -d "$VERSIONS_DIR" ] && [ -n "$(local_versions)" ]; then
@@ -189,27 +192,23 @@ EOF_LOCAL
 select_remote_version() {
     local tags="" choice="" count="0" version=""
     [ -n "$REQUESTED_VERSION" ] && return 0
-    tags=$(github_tags || true)
+    tags=$(supported_versions) || die "Não foi possível consultar as versões suportadas. Tente novamente."
     if [ -z "$tags" ]; then
-        REQUESTED_VERSION="main"
-        warn "O repositório ainda não possui tags; instalando a branch main."
-        return 0
+        die "Nenhuma versão suportada disponível."
     fi
     if [ "$ASSUME_YES" = "true" ]; then
         REQUESTED_VERSION=$(printf '%s\n' "$tags" | sed -n '1p')
         return 0
     fi
-    echo "Versões disponíveis:"
+    echo "Versões suportadas:"
     while IFS= read -r version; do
         count=$((count + 1))
         echo "  $count) $version"
     done <<EOF_TAGS
 $tags
 EOF_TAGS
-    echo "  0) main (desenvolvimento)"
     read -r -p "Escolha uma versão [1]: " choice
     choice="${choice:-1}"
-    if [ "$choice" = "0" ]; then REQUESTED_VERSION="main"; return 0; fi
     printf '%s' "$choice" | grep -Eq '^[0-9]+$' || die "Escolha inválida: $choice"
     REQUESTED_VERSION=$(printf '%s\n' "$tags" | sed -n "${choice}p")
     [ -n "$REQUESTED_VERSION" ] || die "Escolha fora da lista: $choice"
@@ -352,4 +351,6 @@ main() {
     esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

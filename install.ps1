@@ -17,8 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$InstallerVersion = '1.2.0'
-$MaxRemoteVersions = 5
+$InstallerVersion = '1.6.0'
 $InstallRoot = if ($env:SCRIPTS_CERT_HOME) { $env:SCRIPTS_CERT_HOME } else { Join-Path $env:LOCALAPPDATA 'Programs\ScriptsCert' }
 $VersionsDir = Join-Path $InstallRoot 'versions'
 $BinDir = Join-Path $InstallRoot 'bin'
@@ -44,15 +43,18 @@ function Confirm-Action([string]$Message) {
     return (Read-Host "$Message [s/N]") -match '^(s|sim)$'
 }
 
-function Get-GitHubTags {
-    try {
-        $headers = @{ Accept = 'application/vnd.github+json' }
-        return @((Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$Repo/tags?per_page=100" -TimeoutSec 30) | Select-Object -First $MaxRemoteVersions | ForEach-Object { $_.name })
+function Get-SupportedVersions {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/$Repo/main/supported-versions.txt" -TimeoutSec 30
+    $versions = @()
+    foreach ($line in ($response.Content -split "`n")) {
+        $entry = $line.TrimEnd("`r")
+        if ($entry -match '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+            if ($versions -notcontains $entry) { $versions += $entry }
+        } elseif ($entry -notmatch '^\s*(#.*)?$') {
+            throw 'Lista de versoes suportadas invalida.'
+        }
     }
-    catch {
-        Write-Warn "Nao foi possivel consultar tags: $($_.Exception.Message)"
-        return @()
-    }
+    return $versions
 }
 
 function Get-LocalVersions {
@@ -138,20 +140,17 @@ function Set-ActiveVersion([string]$TargetVersion) {
 
 function Select-RemoteVersion {
     if ($Version) { return $Version }
-    $tags = @(Get-GitHubTags)
+    $tags = @(Get-SupportedVersions)
     if ($tags.Count -eq 0) {
-        Write-Warn 'O repositorio ainda nao possui tags; instalando a branch main.'
-        return 'main'
+        throw 'Nenhuma versao suportada disponivel.'
     }
     if ($Yes) { return $tags[0] }
-    Write-Host 'Versoes disponiveis:'
+    Write-Host 'Versoes suportadas:'
     for ($index = 0; $index -lt $tags.Count; $index++) {
         Write-Host "  $($index + 1)) $($tags[$index])"
     }
-    Write-Host '  0) main (desenvolvimento)'
     $choice = Read-Host 'Escolha uma versao [1]'
     if (-not $choice) { $choice = '1' }
-    if ($choice -eq '0') { return 'main' }
     $number = 0
     if (-not [int]::TryParse($choice, [ref]$number) -or $number -lt 1 -or $number -gt $tags.Count) {
         throw "Escolha invalida: $choice"
@@ -198,9 +197,9 @@ function Install-Version {
 function Show-Versions {
     $current = Read-State $CurrentFile
     $previous = Read-State $PreviousFile
-    Write-Host "Versoes publicadas em github.com/${Repo}:"
-    $tags = @(Get-GitHubTags)
-    if ($tags.Count) { $tags | ForEach-Object { Write-Host "  $_" } } else { Write-Host '  (nenhuma tag; main esta disponivel)' }
+    Write-Host "Versoes suportadas em github.com/${Repo}:"
+    $tags = @(Get-SupportedVersions)
+    if ($tags.Count) { $tags | ForEach-Object { Write-Host "  $_" } } else { Write-Host '  (nenhuma versao suportada)' }
     Write-Host ''
     Write-Host 'Versoes instaladas localmente:'
     $locals = @(Get-LocalVersions)

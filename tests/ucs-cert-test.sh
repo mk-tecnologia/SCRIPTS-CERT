@@ -53,6 +53,45 @@ printf '%s\n' "$SAN_OUTPUT" | grep -Fq "DNS:$CN"
 printf '%s\n' "$SAN_OUTPUT" | grep -Fq "DNS:$SHORT_NAME"
 printf '%s\n' "$SAN_OUTPUT" | grep -Fq "IP Address:$IP"
 
+# Missing SAN, commented section header, and section at EOF must produce a usable CSR.
+for variant in missing commented eof; do
+    awk -v variant="$variant" '
+        /^subjectAltName = DNS:old/ { next }
+        /^\[v3_req\]/ && variant == "commented" { print " [ v3_req ] # request extensions"; next }
+        /^\[server_cert\]/ && variant == "eof" { exit }
+        { print }
+    ' "$REPO_DIR/tests/fixtures/ucs-openssl.cnf" > "$OPENSSL_CONFIG"
+    update_san_config
+    cp "$OPENSSL_CONFIG" "$TEST_ROOT/updated.cnf"
+    update_san_config
+    cmp "$TEST_ROOT/updated.cnf" "$OPENSSL_CONFIG"
+    if [ "$variant" != "eof" ]; then
+        grep -Fq 'subjectAltName = DNS:must-remain.example.test' "$OPENSSL_CONFIG"
+    fi
+    openssl req -new -key "$KEY_FILE" -config "$OPENSSL_CONFIG" -out "$REQUEST_FILE"
+    SAN_OUTPUT=$(openssl req -in "$REQUEST_FILE" -noout -text \
+        | awk '/Subject Alternative Name/{getline; gsub(/^ +/, ""); print}')
+    printf '%s\n' "$SAN_OUTPUT" | grep -Fxq "DNS:$CN, DNS:$SHORT_NAME, IP Address:$IP"
+done
+
+# Ambiguous or missing sections must fail without changing the file.
+for variant in no_section duplicate_section duplicate_san; do
+    cp "$REPO_DIR/tests/fixtures/ucs-openssl.cnf" "$OPENSSL_CONFIG"
+    case "$variant" in
+        no_section) sed 's/v3_req/other_extensions/g' "$OPENSSL_CONFIG" > "$TEST_ROOT/invalid.cnf" ;;
+        duplicate_section) { cat "$OPENSSL_CONFIG"; printf '\n[v3_req]\n'; } > "$TEST_ROOT/invalid.cnf" ;;
+        duplicate_san) sed '/^subjectAltName = DNS:old/a\
+subjectAltName = DNS:duplicate.example.test
+' "$OPENSSL_CONFIG" > "$TEST_ROOT/invalid.cnf" ;;
+    esac
+    cp "$TEST_ROOT/invalid.cnf" "$OPENSSL_CONFIG"
+    if (trap - EXIT; update_san_config) > "$TEST_ROOT/error.log" 2>&1; then
+        error "Configuração inválida aceita: $variant"
+    fi
+    grep -Fq 'Nenhum arquivo foi alterado.' "$TEST_ROOT/error.log"
+    cmp "$TEST_ROOT/invalid.cnf" "$OPENSSL_CONFIG"
+done
+
 RUN_COMPLETE="true"
 FILES_MODIFIED="false"
 success "Teste UCS: configuração SAN e CSR validados"

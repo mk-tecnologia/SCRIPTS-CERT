@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.5.3 — 2026-09-07
+
+### Instalador
+
+- Menu baseado em `supported-versions.txt`, oferecendo apenas v2.5.3.
+- Removido fallback automático para main; versões históricas e desenvolvimento exigem seleção explícita por argumento.
+- Instaladores Bash e PowerShell atualizados para 1.6.0.
+
+### ucs-cert.sh
+
+- Insere `subjectAltName` quando ausente em `[v3_req]` e aceita comentário no cabeçalho da seção.
+- Recusa seções `[v3_req]` ausentes ou duplicadas e diretivas SAN duplicadas antes de alterar o arquivo.
+- Adicionados testes de CSR, idempotência e rejeição sem alteração dos arquivos.
+
 ## v2.5.2 — 2026-08-30
 
 ### unifi-cert.sh

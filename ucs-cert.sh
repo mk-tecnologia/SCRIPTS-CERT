@@ -10,8 +10,8 @@
 set -euo pipefail
 
 APP_NAME="ucs-cert"
-APP_VERSION="2.5.2"
-APP_RELEASE_DATE="2026-08-30"
+APP_VERSION="2.5.3"
+APP_RELEASE_DATE="2026-09-07"
 DEFAULT_PORT="443"
 DEFAULT_MAX_DAYS="3650"
 LOG_DIR="/var/log/${APP_NAME}"
@@ -280,22 +280,30 @@ backup_current() {
 }
 
 update_san_config() {
-    local san_count="" generated_config=""
+    local config_counts="" section_count="" san_count="" generated_config=""
     step "Atualizando SAN no openssl.cnf"
-    san_count=$(awk '
-        /^[[:space:]]*\[[[:space:]]*v3_req[[:space:]]*\][[:space:]]*$/ { in_v3_req = 1; next }
+    config_counts=$(awk '
+        /^[[:space:]]*\[[[:space:]]*v3_req[[:space:]]*\][[:space:]]*(#.*)?$/ { in_v3_req = 1; sections++; next }
         /^[[:space:]]*\[/ { in_v3_req = 0 }
         in_v3_req && /^[[:space:]]*subjectAltName[[:space:]]*=/ { count++ }
-        END { print count + 0 }
+        END { print sections + 0, count + 0 }
     ' "$OPENSSL_CONFIG")
-    [ "$san_count" -eq 1 ] \
-        || error "Esperava exatamente uma linha subjectAltName na seção [v3_req] de $OPENSSL_CONFIG; encontrei $san_count. Nenhum arquivo foi alterado."
+    read -r section_count san_count <<< "$config_counts"
+    [ "$section_count" -eq 1 ] \
+        || error "Esperava exatamente uma seção [v3_req] em $OPENSSL_CONFIG; encontrei $section_count. Nenhum arquivo foi alterado."
+    [ "$san_count" -le 1 ] \
+        || error "Encontrei $san_count linhas subjectAltName na seção [v3_req] de $OPENSSL_CONFIG. Nenhum arquivo foi alterado."
 
     [ -n "${WORK_DIR:-}" ] && [ -d "$WORK_DIR" ] && rm -rf "$WORK_DIR"
     WORK_DIR=$(mktemp -d "/tmp/${APP_NAME}_XXXXXX")
     generated_config="$WORK_DIR/openssl.cnf"
-    awk -v san="subjectAltName = DNS:${CN}, DNS:${SHORT_NAME}, IP:${IP}" '
-        /^[[:space:]]*\[[[:space:]]*v3_req[[:space:]]*\][[:space:]]*$/ { in_v3_req = 1; print; next }
+    awk -v san="subjectAltName = DNS:${CN}, DNS:${SHORT_NAME}, IP:${IP}" -v san_count="$san_count" '
+        /^[[:space:]]*\[[[:space:]]*v3_req[[:space:]]*\][[:space:]]*(#.*)?$/ {
+            in_v3_req = 1
+            print
+            if (san_count == 0) print san
+            next
+        }
         /^[[:space:]]*\[/ { in_v3_req = 0 }
         in_v3_req && /^[[:space:]]*subjectAltName[[:space:]]*=/ { print san; next }
         { print }
