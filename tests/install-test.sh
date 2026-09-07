@@ -9,19 +9,19 @@ curl() {
 }
 # Version selection must not depend on the system awk implementation.
 awk() { return 99; }
-MANIFEST=$'# Versões suportadas; tags históricas\nv2.5.5\r\nv2.5.5\n'
-[ "$(supported_versions)" = v2.5.5 ]
+MANIFEST=$'# Versões suportadas; tags históricas\nv2.5.6\r\nv2.5.6\n'
+[ "$(supported_versions)" = v2.5.6 ]
 MANIFEST=$(cat "$REPO_DIR/supported-versions.txt")
-[ "$(supported_versions)" = v2.5.5 ]
+[ "$(supported_versions)" = v2.5.6 ]
 ASSUME_YES=true
 select_remote_version
-[ "$REQUESTED_VERSION" = v2.5.5 ]
+[ "$REQUESTED_VERSION" = v2.5.6 ]
 REQUESTED_VERSION=''
 ASSUME_YES=false
 OUTPUT=$(select_remote_version <<< '')
-[[ "$OUTPUT" == *'1) v2.5.5'* ]]
+[[ "$OUTPUT" == *'1) v2.5.6'* ]]
 [[ "$OUTPUT" != *'0) main'* ]]
-for MANIFEST in '' 'v2.5.5
+for MANIFEST in '' 'v2.5.6
 invalid' '# empty'; do
     if (select_remote_version) >/dev/null 2>&1; then
         die 'Invalid/empty manifest was accepted'

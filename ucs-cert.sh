@@ -10,7 +10,7 @@
 set -euo pipefail
 
 APP_NAME="ucs-cert"
-APP_VERSION="2.5.5"
+APP_VERSION="2.5.6"
 APP_RELEASE_DATE="2026-09-07"
 DEFAULT_PORT="443"
 DEFAULT_MAX_DAYS="3650"
@@ -48,13 +48,16 @@ FILES_MODIFIED="false"
 RUN_COMPLETE="false"
 UCS_ROLE=""
 PRIMARY=""
+BACKUP_NODES=()
+CA_FILE="/etc/univention/ssl/ucsCA/CAcert.pem"
 ISSUE_ONLY="false"
 SCRIPT_FILE="${BASH_SOURCE[0]:-}"
 
 usage() {
     cat <<EOF
 ${APP_NAME} v${APP_VERSION}
-Adiciona nome/IP ao SAN e renova o certificado de host pela CA interna do UCS.
+No Primary, emite certificados do host e dos Backups descobertos no LDAP.
+No Backup, sincroniza pelo UCS e aplica o certificado emitido no Primary.
 
 Uso:
   ${APP_NAME} [opções]
@@ -62,9 +65,8 @@ Uso:
 Opções:
   --cn FQDN          FQDN do host UCS (padrão: hostname -f)
   --short NOME       Nome curto no SAN (padrão: hostname -s)
-  --ip IP            IPv4 que deve constar no SAN
-  --primary FQDN     Primary para emissão via SSH no Backup (padrão: ldap/master)
-  --issue-only       Emite no Primary sem recarregar serviços (uso remoto)
+  --ip IP            IPv4 no SAN; vários separados por vírgula
+  --issue-only       Emite apenas o host indicado no Primary, sem recarregar serviços
   --port PORTA       Porta HTTPS verificada (padrão: 443)
   --days DIAS        Validade; padrão obtido de ssl/default/days
   -y, --yes          Executa sem confirmação
@@ -134,14 +136,14 @@ require_cmd() {
 
 check_dependencies() {
     local command=""
-    for command in openssl univention-certificate ucr systemctl hostname grep sed awk cut tr mktemp seq sleep; do
+    for command in openssl univention-certificate ucr systemctl hostname grep sed awk cut tr mktemp seq sleep timeout; do
         require_cmd "$command"
     done
     [ -r /usr/share/univention-ssl/make-certificates.sh ] \
         || error "Arquivo UCS não encontrado: /usr/share/univention-ssl/make-certificates.sh"
 }
 
-validate_ip() {
+validate_ipv4() {
     local ip="$1" octet="" IFS='.'
     local octets=()
     read -r -a octets <<< "$ip"
@@ -151,6 +153,17 @@ validate_ip() {
         [ "$octet" -ge 0 ] 2>/dev/null && [ "$octet" -le 255 ] 2>/dev/null \
             || error "IPv4 inválido: $ip"
     done
+}
+
+validate_ip() {
+    local address="" addresses=()
+    [[ "$1" != ,* && "$1" != *, && "$1" != *,,* ]] || error "Lista IPv4 inválida: $1"
+    IFS=',' read -r -a addresses <<< "$1"
+    for address in "${addresses[@]}"; do validate_ipv4 "$address"; done
+}
+
+san_value() {
+    printf 'DNS:%s, DNS:%s, IP:%s' "$CN" "$SHORT_NAME" "${IP//,/, IP:}"
 }
 
 validate_hostname() {
@@ -185,7 +198,6 @@ confirm_or_exit() {
 parse_args() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
-            --primary) [ "$#" -ge 2 ] || error "Faltou valor para --primary"; PRIMARY="$2"; shift 2 ;;
             --issue-only) ISSUE_ONLY="true"; shift ;;
             --cn) [ "$#" -ge 2 ] || error "Faltou valor para --cn"; CN="$2"; shift 2 ;;
             --short) [ "$#" -ge 2 ] || error "Faltou valor para --short"; SHORT_NAME="$2"; shift 2 ;;
@@ -220,11 +232,9 @@ check_ucs_role() {
             ;;
         domaincontroller_backup|backup_directory_node)
             [ "$ISSUE_ONLY" != "true" ] || error "A emissão deve ocorrer no Primary."
-            require_cmd ssh
-            require_cmd scp
-            PRIMARY="${PRIMARY:-$(ucr get ldap/master)}"
+            PRIMARY=$(ucr get ldap/master)
             validate_hostname "$PRIMARY"
-            success "Backup UCS: emissão no Primary $PRIMARY via SSH como root"
+            success "Backup UCS: sincronização nativa a partir de $PRIMARY"
             ;;
         *)
             error "Este procedimento deve rodar no Primary ou Backup Directory Node. Papel atual: ${role:-desconhecido}"
@@ -272,12 +282,12 @@ collect_config() {
     echo "  Porta     : $PORT"
     echo "  Validade  : $CERT_VALIDITY dias"
     echo "  Diretório : $CERT_DIR"
-    echo "  Novo SAN  : DNS:$CN, DNS:$SHORT_NAME, IP:$IP"
+    echo "  Novo SAN  : $(san_value)"
     echo ""
     if [ -n "$PRIMARY" ]; then
-        echo "  Emissão   : root@$PRIMARY (SSH); aplicação neste Backup"
+        echo "  Origem    : $PRIMARY; sincronização nativa e aplicação neste Backup"
     fi
-    confirm_or_exit "Confirmar backup, renovação e aplicação?"
+
 }
 
 validate_existing_material() {
@@ -309,7 +319,7 @@ update_san_config() {
     local section_pattern='^[[:space:]]*\[[[:space:]]*v3_req[[:space:]]*\][[:space:]]*(#.*)?$'
     local any_section_pattern='^[[:space:]]*\['
     local san_pattern='^[[:space:]]*subjectAltName[[:space:]]*='
-    local san="subjectAltName = DNS:${CN}, DNS:${SHORT_NAME}, IP:${IP}"
+    local san="subjectAltName = $(san_value)"
     step "Atualizando SAN no openssl.cnf"
     while IFS= read -r line || [ -n "$line" ]; do
         parsed="${line%$'\r'}"
@@ -349,9 +359,9 @@ update_san_config() {
 
     FILES_MODIFIED="true"
     run_cmd cp "$generated_config" "$OPENSSL_CONFIG"
-    grep -Fq "subjectAltName = DNS:${CN}, DNS:${SHORT_NAME}, IP:${IP}" "$OPENSSL_CONFIG" \
+    grep -Fq "$san" "$OPENSSL_CONFIG" \
         || error "Não consegui confirmar a nova configuração SAN."
-    success "SAN configurado: DNS:$CN, DNS:$SHORT_NAME, IP:$IP"
+    success "SAN configurado: $(san_value)"
 }
 
 rebuild_request() {
@@ -377,12 +387,16 @@ renew_certificate() {
 verify_new_certificate() {
     local cert_pubkey="" key_pubkey=""
     step "Validando certificado renovado"
-    openssl x509 -in "$CERT_FILE" -noout -checkhost "$CN" >/dev/null \
-        || error "O certificado renovado não contém DNS:$CN."
-    openssl x509 -in "$CERT_FILE" -noout -checkhost "$SHORT_NAME" >/dev/null \
-        || error "O certificado renovado não contém DNS:$SHORT_NAME."
-    openssl x509 -in "$CERT_FILE" -noout -checkip "$IP" >/dev/null \
-        || error "O certificado renovado não contém IP:$IP."
+    local address="" addresses=()
+    openssl verify -CAfile "$CA_FILE" -purpose sslserver -verify_hostname "$CN" "$CERT_FILE" >/dev/null \
+        || error "Certificado inválido: cadeia, validade ou nome $CN."
+    openssl verify -CAfile "$CA_FILE" -verify_hostname "$SHORT_NAME" "$CERT_FILE" >/dev/null \
+        || error "O certificado não corresponde ao nome $SHORT_NAME."
+    IFS=',' read -r -a addresses <<< "$IP"
+    for address in "${addresses[@]}"; do
+        openssl verify -CAfile "$CA_FILE" -verify_ip "$address" "$CERT_FILE" >/dev/null \
+            || error "O certificado não contém IP:$address ou não é válido."
+    done
     cert_pubkey=$(openssl x509 -in "$CERT_FILE" -pubkey -noout | openssl sha256)
     key_pubkey=$(openssl pkey -in "$KEY_FILE" -pubout | openssl sha256)
     [ "$cert_pubkey" = "$key_pubkey" ] || error "A chave deixou de corresponder ao certificado renovado."
@@ -390,28 +404,83 @@ verify_new_certificate() {
     success "Certificado, SANs e chave validados"
 }
 
-renew_on_primary() {
-    local remote_command="" file="" downloaded_pubkey="" local_pubkey=""
-    step "Renovando o certificado de $CN no Primary $PRIMARY"
-    # Quote each argument for the remote shell; never disable SSH host verification.
-    printf -v remote_command '%q ' bash -s -- --issue-only --yes \
-        --cn "$CN" --short "$SHORT_NAME" --ip "$IP" --days "$CERT_VALIDITY"
-    ssh -o ConnectTimeout=15 "root@$PRIMARY" "$remote_command" < "$SCRIPT_FILE" \
-        || error "Falha na emissão no Primary; arquivos locais preservados."
-    warn "Emissão concluída no Primary. Se a aplicação local falhar, a renovação permanece no Primary; execute novamente para reaplicar."
-    WORK_DIR=$(mktemp -d "/tmp/${APP_NAME}_XXXXXX")
-    for file in openssl.cnf req.pem cert.pem; do
-        scp -o ConnectTimeout=15 "root@$PRIMARY:/etc/univention/ssl/$CN/$file" "$WORK_DIR/$file" \
-            || error "Falha ao obter $file do Primary; arquivos locais preservados."
+discover_backups() {
+    local inventory="" record=""
+    require_cmd python3
+    inventory=$(python3 - <<'PYLDAP'
+import ipaddress
+import univention.uldap
+lo = univention.uldap.getMachineConnection()
+rows = []
+for dn, attrs in lo.search(filter='(univentionObjectType=computers/domaincontroller_backup)',
+                           attr=['cn', 'associatedDomain', 'aRecord']):
+    def values(key):
+        return [v.decode('utf-8') if isinstance(v, bytes) else v for v in attrs.get(key, [])]
+    names, domains = values('cn'), values('associatedDomain')
+    addresses = sorted({str(ipaddress.IPv4Address(ip)) for ip in values('aRecord')})
+    if len(names) != 1 or len(domains) != 1 or not addresses:
+        raise SystemExit('Backup com nome, domínio ou IPv4 ausente/ambíguo no LDAP: ' + dn)
+    rows.append((names[0] + '.' + domains[0], names[0], ','.join(addresses)))
+for row in sorted(set(rows)):
+    print('\t'.join(row))
+PYLDAP
+    ) || error "Não foi possível descobrir os Backups no LDAP; nenhum certificado foi alterado."
+    BACKUP_NODES=()
+    while IFS= read -r record; do
+        [ -n "$record" ] || continue
+        local node_cn="" node_short="" node_ip=""
+        IFS=$'\t' read -r node_cn node_short node_ip <<< "$record"
+        validate_hostname "$node_cn"
+        validate_hostname "$node_short"
+        validate_ip "$node_ip"
+        BACKUP_NODES+=("$record")
+        echo "  Backup    : $node_cn — IPv4 $node_ip"
+    done <<< "$inventory"
+    info "${#BACKUP_NODES[@]} Backup(s) encontrado(s) no LDAP."
+}
+
+sync_from_primary() {
+    local sync_script="/usr/share/univention-ssl/ssl-sync"
+    [ -x "$sync_script" ] || error "Sincronizador UCS não encontrado: $sync_script"
+    step "Sincronizando certificados pelo mecanismo nativo do UCS"
+    # UCS authenticates with the machine account; no root SSH credentials.
+    run_cmd "$sync_script" || error "Falha na sincronização nativa do UCS."
+    # ssl-sync owns the entire SSL tree, including keys and CA. Do not undo it
+    # with a partial three-file rollback that would break certificate/key pairing.
+    verify_new_certificate
+}
+
+served_fingerprint() {
+    timeout 10 openssl s_client -connect "${IP%%,*}:$PORT" -servername "$CN" </dev/null 2>/dev/null \
+        | openssl x509 -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2
+}
+
+renew_backups() {
+    local record="" node_cn="" node_short="" node_ip="" expected="" served="" failed=0 pending=0
+    [ "${#BACKUP_NODES[@]}" -gt 0 ] || return 0
+    for record in "${BACKUP_NODES[@]}"; do
+        IFS=$'\t' read -r node_cn node_short node_ip <<< "$record"
+        step "Emitindo certificado do Backup $node_cn no Primary"
+        if bash "$SCRIPT_FILE" --issue-only --yes --cn "$node_cn" --short "$node_short" \
+            --ip "$node_ip" --days "$CERT_VALIDITY" --port "$PORT"; then
+            expected=$(openssl x509 -in "/etc/univention/ssl/$node_cn/cert.pem" -noout -fingerprint -sha256 | cut -d= -f2)
+            served=$(CN="$node_cn" IP="$node_ip" served_fingerprint) || served=""
+            if [ -n "$served" ] && [ "$served" = "$expected" ]; then
+                success "$node_cn: certificado servido confirmado em ${node_ip%%,*}:$PORT"
+            else
+                pending=$((pending + 1))
+                warn "$node_cn: emitido; sincronização/ativação ainda não confirmada."
+            fi
+        else
+            failed=$((failed + 1))
+            warn "$node_cn: falha na emissão; consulte o diagnóstico acima."
+        fi
     done
-    downloaded_pubkey=$(openssl x509 -in "$WORK_DIR/cert.pem" -pubkey -noout | openssl sha256)
-    local_pubkey=$(openssl pkey -in "$KEY_FILE" -pubout | openssl sha256)
-    [ "$downloaded_pubkey" = "$local_pubkey" ] \
-        || error "A chave do certificado no Primary difere da chave local; verifique a sincronização UCS."
-    FILES_MODIFIED="true"
-    for file in openssl.cnf req.pem cert.pem; do
-        run_cmd cp "$WORK_DIR/$file" "$CERT_DIR/$file"
-    done
+    info "Backups: $failed falha(s) de emissão; $pending aguardando confirmação do certificado servido."
+    if [ "$pending" -gt 0 ]; then
+        info "O UCS sincroniza periodicamente. Para sincronizar e recarregar Apache imediatamente, execute ucs-cert no Backup atualizado."
+    fi
+    [ "$failed" -eq 0 ]
 }
 
 activate_and_verify() {
@@ -421,7 +490,7 @@ activate_and_verify() {
     expected=$(openssl x509 -in "$CERT_FILE" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':')
     for attempt in $(seq 1 15); do
         if systemctl is-active --quiet apache2; then
-            served=$(openssl s_client -connect "$IP:$PORT" -servername "$CN" </dev/null 2>/dev/null \
+            served=$(timeout 10 openssl s_client -connect "${IP%%,*}:$PORT" -servername "$CN" </dev/null 2>/dev/null \
                 | openssl x509 -noout -fingerprint -sha256 2>/dev/null \
                 | cut -d= -f2 | tr -d ':') || true
             if [ -n "$served" ] && [ "$served" = "$expected" ]; then
@@ -442,7 +511,7 @@ final_summary() {
     printf "%b║       ✅ Certificado UCS renovado e verificado        ║%b\n" "$BOLD" "$NC"
     printf "%b╚══════════════════════════════════════════════════════╝%b\n" "$BOLD" "$NC"
     echo "  Certificado: $CERT_FILE"
-    echo "  SAN        : DNS:$CN, DNS:$SHORT_NAME, IP:$IP"
+    echo "  SAN        : $(san_value)"
     echo "  SHA-256    : $fingerprint"
     echo "  Backup     : $BACKUP_TARGET"
     echo "  Log        : $LOG_DIR/${APP_NAME}.log"
@@ -461,20 +530,32 @@ main() {
     check_dependencies
     check_ucs_role
     collect_config
-    validate_existing_material
-    backup_current
     case "$UCS_ROLE" in
-        domaincontroller_backup|backup_directory_node) renew_on_primary ;;
-        *) update_san_config; rebuild_request; renew_certificate ;;
+        domaincontroller_master|primary_directory_node)
+            if [ "$ISSUE_ONLY" != "true" ]; then discover_backups; fi
+            confirm_or_exit "Confirmar emissão para os hosts listados e aplicação no Primary?"
+            validate_existing_material
+            backup_current
+            update_san_config
+            rebuild_request
+            renew_certificate
+            verify_new_certificate
+            ;;
+        *)
+            confirm_or_exit "Confirmar sincronização nativa UCS e recarga do Apache local?"
+            sync_from_primary
+            ;;
     esac
-    verify_new_certificate
     if [ "$ISSUE_ONLY" != "true" ]; then
         activate_and_verify
     fi
-    log_msg "RENEWED cn=$CN short=$SHORT_NAME ip=$IP port=$PORT days=$CERT_VALIDITY backup=$BACKUP_TARGET"
+    log_msg "VERIFIED role=$UCS_ROLE issue_only=$ISSUE_ONLY cn=$CN short=$SHORT_NAME ip=$IP port=$PORT days=$CERT_VALIDITY backup=$BACKUP_TARGET"
     RUN_COMPLETE="true"
     FILES_MODIFIED="false"
     final_summary
+    if [ "$ISSUE_ONLY" != "true" ] && [[ "$UCS_ROLE" = domaincontroller_master || "$UCS_ROLE" = primary_directory_node ]]; then
+        renew_backups || return 1
+    fi
 }
 
 if [[ "${BASH_SOURCE[0]:-}" == "$0" || -z "${BASH_SOURCE[0]:-}" ]]; then

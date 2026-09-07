@@ -128,59 +128,59 @@ if (trap - EXIT; ISSUE_ONLY=true; check_ucs_role) > "$TEST_ROOT/error.log" 2>&1;
 fi
 unset -f ucr
 
-# Exercise transport and local installation with real certificate/key material.
-PRIMARY=primary.example.test
-SCRIPT_FILE="$REPO_DIR/ucs-cert.sh"
-FILES_MODIFIED=false
-cp "$TEST_ROOT/expected/"* "$CERT_DIR/"
-ssh() {
-    printf '%s\n' "$*" > "$TEST_ROOT/ssh-args"
-    cat > "$TEST_ROOT/remote-script"
-    return "${SSH_RESULT:-0}"
-}
-scp() {
-    local source_file="${3##*/}"
-    cp "$TEST_ROOT/expected/$source_file" "$4"
-}
-renew_on_primary
-cmp "$SCRIPT_FILE" "$TEST_ROOT/remote-script"
-grep -Fq -- '--issue-only' "$TEST_ROOT/ssh-args"
-grep -Fq -- "--cn $CN" "$TEST_ROOT/ssh-args"
-cmp "$TEST_ROOT/expected/private.key" "$KEY_FILE"
-rm -rf "$WORK_DIR"
-WORK_DIR=""
-FILES_MODIFIED=false
-SSH_RESULT=1
-if (trap - EXIT; renew_on_primary) > "$TEST_ROOT/error.log" 2>&1; then
-    error "Falha SSH ignorada"
+# Discovery validates the entire inventory before any renewal begins.
+python3() { printf '%s\n' "$INVENTORY"; return "${DISCOVERY_RESULT:-0}"; }
+INVENTORY=$'srv-ad-bkp\tsrv-ad-bkp\t192.168.170.18,192.168.170.19'
+discover_backups
+[ "${#BACKUP_NODES[@]}" -eq 1 ]
+INVENTORY=""
+discover_backups
+[ "${#BACKUP_NODES[@]}" -eq 0 ]
+renew_backups
+INVENTORY=$'bad/host\tbad\t192.168.170.18'
+if (trap - EXIT; discover_backups) > "$TEST_ROOT/error.log" 2>&1; then
+    error "Hostname inseguro aceito no LDAP"
 fi
-SSH_RESULT=0
-scp() { return 1; }
-if (trap - EXIT; renew_on_primary) > "$TEST_ROOT/error.log" 2>&1; then
-    error "Falha de download ignorada"
+DISCOVERY_RESULT=1
+if (trap - EXIT; discover_backups) > "$TEST_ROOT/error.log" 2>&1; then
+    error "Falha LDAP ignorada"
 fi
-for file in openssl.cnf req.pem cert.pem private.key; do
-    cmp "$TEST_ROOT/expected/$file" "$CERT_DIR/$file"
-done
-# Mismatched downloaded certificate must be rejected before copying any file.
-openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=other.example.test \
-    -keyout "$TEST_ROOT/other.key" -out "$TEST_ROOT/other.pem" -days 1 >/dev/null 2>&1
-scp() {
-    local source_file="${3##*/}"
-    if [ "$source_file" = cert.pem ]; then
-        cp "$TEST_ROOT/other.pem" "$4"
-    else
-        cp "$TEST_ROOT/expected/$source_file" "$4"
-    fi
+unset -f python3
+
+# Multiple IPs must survive CSR creation and real certificate verification.
+cp "$REPO_DIR/tests/fixtures/ucs-openssl.cnf" "$OPENSSL_CONFIG"
+IP="192.168.170.18,192.168.170.19"
+validate_ip "$IP"
+update_san_config
+openssl req -new -key "$KEY_FILE" -config "$OPENSSL_CONFIG" -out "$REQUEST_FILE"
+openssl req -x509 -key "$KEY_FILE" -config "$OPENSSL_CONFIG" -extensions v3_req -out "$CERT_FILE" -days 1
+CA_FILE="$CERT_FILE"
+univention-certificate() { return 0; }
+verify_new_certificate
+if (trap - EXIT; IP=192.168.170.20; verify_new_certificate) > "$TEST_ROOT/error.log" 2>&1; then
+    error "SAN sem o IP solicitado aceito"
+fi
+unset -f univention-certificate
+
+# Child failures do not stop subsequent backups; pending activation is explicit.
+BACKUP_NODES=($'bad.example.test\tbad\t192.168.170.18' $'good.example.test\tgood\t192.168.170.19')
+bash() {
+    printf '%s\n' "$*" >> "$TEST_ROOT/issued"
+    [[ "$*" != *bad.example.test* ]]
 }
-if (trap - EXIT; renew_on_primary) > "$TEST_ROOT/error.log" 2>&1; then
-    error "Certificado com chave diferente aceito"
+openssl() { echo 'sha256 Fingerprint=AA:BB'; }
+served_fingerprint() { echo AA:BB; }
+if renew_backups > "$TEST_ROOT/batch.log"; then
+    error "Falha de emissão não reportada"
 fi
-grep -Fq 'difere da chave local' "$TEST_ROOT/error.log"
-for file in openssl.cnf req.pem cert.pem private.key; do
-    cmp "$TEST_ROOT/expected/$file" "$CERT_DIR/$file"
-done
-unset -f ssh scp
+grep -Fq 'good.example.test' "$TEST_ROOT/issued"
+grep -Fq 'certificado servido confirmado' "$TEST_ROOT/batch.log"
+BACKUP_NODES=($'good.example.test\tgood\t192.168.170.19')
+served_fingerprint() { return 1; }
+renew_backups > "$TEST_ROOT/batch.log"
+grep -Fq 'sincronização/ativação ainda não confirmada' "$TEST_ROOT/batch.log"
+unset -f bash openssl served_fingerprint
+
 # Remote rollback must not reload the Primary Apache.
 systemctl() { echo called > "$TEST_ROOT/reloaded"; }
 ISSUE_ONLY=true
@@ -192,4 +192,4 @@ ISSUE_ONLY=false
 
 RUN_COMPLETE="true"
 FILES_MODIFIED="false"
-success "Teste UCS: SAN, CSR, papéis e transporte do Backup validados"
+success "Teste UCS: SAN, CSR, papéis e descoberta LDAP e emissão em lote validados"

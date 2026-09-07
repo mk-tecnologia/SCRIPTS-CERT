@@ -1,6 +1,6 @@
 # SCRIPTS-CERT
 
-Versão atual dos scripts: **2.5.5** — 2026-09-07. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
+Versão atual dos scripts: **2.5.6** — 2026-09-07. Cada script mostra sua versão e data no cabeçalho e aceita a opção `--version`.
 
 Coleção de scripts Bash para gerar, aplicar, importar e remover certificados SSL/TLS em ambientes internos. Todos podem ser usados de forma interativa: execute o comando e responda às perguntas.
 
@@ -61,7 +61,7 @@ O instalador guarda as versões em `~/.local/share/scripts-cert/` e permite list
 
 ```bash
 scripts-cert-installer --list
-scripts-cert-installer --use v2.5.5
+scripts-cert-installer --use v2.5.6
 scripts-cert-installer --rollback
 scripts-cert-installer --prune
 ```
@@ -69,7 +69,7 @@ scripts-cert-installer --prune
 Para instalar diretamente uma versão publicada:
 
 ```bash
-bash /tmp/scripts-cert-install.sh --version v2.5.5 --yes
+bash /tmp/scripts-cert-install.sh --version v2.5.6 --yes
 ```
 
 > `proxmox-cert`, `unifi-cert` e `ucs-cert` devem ser executados no servidor correspondente. O `trust-cert` pode ser usado no computador que acessa esses servidores.
@@ -90,8 +90,8 @@ Para gerenciar versões:
 
 ```powershell
 scripts-cert-installer -List
-scripts-cert-installer -Version v2.5.5 -Yes
-scripts-cert-installer -Use v2.5.5
+scripts-cert-installer -Version v2.5.6 -Yes
+scripts-cert-installer -Use v2.5.6
 scripts-cert-installer -Rollback
 scripts-cert-installer -Prune
 ```
@@ -120,7 +120,7 @@ Certificados já aplicados, CAs, backups e logs também são preservados para ev
 trust-cert --remove --host SERVIDOR --port PORTA
 ```
 
-O instalador mostra somente as versões suportadas listadas em `supported-versions.txt` na branch `main`, em ordem de preferência. Atualmente apenas `v2.5.5` é oferecida; tags anteriores permanecem como histórico. A cada release, atualize essa lista para retirar versões substituídas ou com erros conhecidos. Falhas ao consultar a lista interrompem a instalação. Desenvolvimento e versões históricas exigem `--version REF` (PowerShell: `-Version REF`) explícito. Depois de instalar, trocar ou restaurar uma versão, ele remove automaticamente versões locais que não sejam a ativa ou a anterior. Assim permanece disponível um rollback sem acumular cópias antigas. A limpeza também pode ser executada manualmente com `scripts-cert-installer --prune`.
+O instalador mostra somente as versões suportadas listadas em `supported-versions.txt` na branch `main`, em ordem de preferência. Atualmente apenas `v2.5.6` é oferecida; tags anteriores permanecem como histórico. A cada release, atualize essa lista para retirar versões substituídas ou com erros conhecidos. Falhas ao consultar a lista interrompem a instalação. Desenvolvimento e versões históricas exigem `--version REF` (PowerShell: `-Version REF`) explícito. Depois de instalar, trocar ou restaurar uma versão, ele remove automaticamente versões locais que não sejam a ativa ou a anterior. Assim permanece disponível um rollback sem acumular cópias antigas. A limpeza também pode ser executada manualmente com `scripts-cert-installer --prune`.
 
 No Windows PowerShell:
 
@@ -437,56 +437,44 @@ UniFi OS : /home/uosserver/.local/share/containers/storage/volumes/uosserver_dat
 
 ## ucs-cert
 
-Corrige o SAN e renova o certificado de host pela CA interna do Univention Corporate Server. Deve ser executado no próprio Primary ou Backup Directory Node. No Backup, emite no Primary por SSH como root (descoberto via `ucr get ldap/master`), baixa os arquivos públicos e aplica localmente, preservando a chave privada. O Primary não precisa ter o script instalado.
-
-Uso interativo no servidor UCS Primary ou Backup Directory Node:
+Execute `ucs-cert` no **Primary Directory Node**. O script consulta o LDAP, apresenta os Backup Nodes e seus IPv4 cadastrados e, após confirmação, renova o certificado do Primary e um certificado próprio para cada Backup. Inclui FQDN, nome curto e todos os IPv4 cadastrados no SAN, preservando as chaves existentes.
 
 ```bash
 sudo ucs-cert
 ```
 
-Modo direto:
+A distribuição usa a sincronização periódica nativa do UCS (`ssl-sync`, conta de máquina). O script não exige login root por SSH e não altera cron, permissões ou autenticação do domínio. A emissão de cada Backup ocorre no Primary; o resultado diferencia falha de emissão, certificado servido confirmado e sincronização/ativação pendente. A consulta HTTPS tem limite de 10 segundos por servidor e verifica o primeiro IPv4 cadastrado, na porta informada.
+
+Para antecipar a sincronização e ativar o certificado, execute a versão atualizada no Backup:
 
 ```bash
-sudo ucs-cert \
-  --cn mkserver.cdl.intranet \
-  --short mkserver \
-  --ip 192.168.110.2
+sudo ucs-cert
 ```
+
+Nesse papel, o script executa `/usr/share/univention-ssl/ssl-sync`, valida cadeia, validade, nomes, IP e correspondência com a chave, recarrega Apache e verifica o fingerprint servido. O `ssl-sync` sincroniza a árvore SSL completa, conforme o comportamento nativo do UCS. Essa sincronização não é revertida pelo script; falhas de validação impedem a recarga. A execução no Primary, sozinha, não recarrega os serviços dos Backups.
 
 Opções:
 
 ```text
---cn FQDN          FQDN do host UCS
---short NOME       Nome curto incluído no SAN
---ip IP            IPv4 incluído no SAN
---primary FQDN     Primary para emissão via SSH no Backup (padrão: ldap/master)
+--cn FQDN          FQDN do host (padrão: hostname -f)
+--short NOME       Nome curto no SAN
+--ip IPS           IPv4 ou lista separada por vírgulas
+--issue-only       Emite somente o host indicado no Primary, sem recarregar Apache
 --port PORTA       Porta HTTPS verificada (padrão: 443)
---days DIAS        Validade do certificado
+--days DIAS        Validade solicitada
 -y, --yes          Executa sem confirmação
--v, --verbose      Mostra os comandos executados
--h, --help         Exibe ajuda
---version          Exibe versão e data
+-v, --verbose      Mostra comandos
 ```
 
-O que o script faz:
-
-- Confirma que está no Primary ou Backup Directory Node.
-- Localiza `/etc/univention/ssl/FQDN/` e valida certificado e chave existentes.
-- Faz backup de `openssl.cnf`, `req.pem`, `cert.pem` e `private.key`.
-- Configura `DNS:FQDN`, `DNS:nome-curto` e `IP:endereço` no SAN.
-- Recria o CSR usando a chave privada existente.
-- Renova por `univention-certificate`, preservando a CA interna do domínio.
-- Recarrega o Apache e compara o fingerprint servido com o certificado renovado.
-- Restaura automaticamente os arquivos anteriores se qualquer etapa falhar.
-
-No Backup, é necessário acesso SSH de root ao Primary e `ssh`/`scp` disponíveis. A verificação da identidade SSH permanece habilitada. A emissão ocorre no Primary porque a [sincronização da CA é unidirecional](https://docs.software-univention.de/manual/5.0/en/domain-ldap/ssl.html). Se a aplicação no Backup falhar após a emissão, o certificado renovado permanece no Primary; o rollback restaura apenas os arquivos locais. Corrija a falha e execute novamente. A sincronização periódica do UCS também poderá trazer o certificado emitido.
-
-Exemplo no `srv-ad-bkp`:
+Exemplo de emissão individual no Primary:
 
 ```bash
-sudo ucs-cert --cn srv-ad-bkp.ccs.intranet --short srv-ad-bkp --ip 192.168.170.18
+sudo ucs-cert --issue-only --cn srv-ad-bkp.ccs.intranet --short srv-ad-bkp --ip 192.168.170.18
 ```
+
+A descoberta falha antes de qualquer alteração se um Backup não tiver nome, domínio ou IPv4 válido no LDAP. IPv6 não é suportado nesta versão. Cada emissão tem backup e recuperação próprios; falhas em um Backup não impedem os demais e fazem o comando terminar com erro. Certificados já emitidos com sucesso permanecem emitidos. A recuperação dos arquivos não desfaz registros no banco da CA.
+
+Referência: [sincronizador oficial do UCS](https://github.com/univention/univention-corporate-server/blob/5.2-0/base/univention-ssl/ssl-sync).
 
 Arquivos:
 

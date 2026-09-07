@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.5.6 — 2026-09-07
+
+- Emissão centralizada no Primary para Backups descobertos no LDAP, com todos os IPv4 cadastrados no SAN.
+- Removida a dependência de SSH root: distribuição pelo UCS; execução no Backup usa ssl-sync e recarrega Apache após validação.
+- Resultado por Backup distingue emissão, falha e ativação pendente; falhas isoladas não interrompem os demais.
+- Validação por openssl verify verifica cadeia, validade e identidade; conexões HTTPS limitadas a 10 segundos.
+
 ## v2.5.5 — 2026-09-07
 
 - Suporte a Backup Directory Node: emissão no Primary via SSH e aplicação local, preservando a chave privada.
